@@ -1,0 +1,125 @@
+# Shared AI Infrastructure
+# This infrastructure is shared across all projects
+# Each project uses its own collection/namespace in Qdrant
+
+version: '3.8'
+
+services:
+  # Vector Database - stores embeddings for all projects
+  # Each project uses a separate collection (e.g., "cypro_codebase", "other_project_codebase")
+  qdrant:
+    image: qdrant/qdrant:v1.7.4
+    container_name: shared-qdrant
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    environment:
+      - QDRANT__SERVICE__GRPC_PORT=6334
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # Local LLM - Ollama
+  ollama:
+    image: ollama/ollama:latest
+    container_name: shared-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # Embedding Model Server (BGE-M3)
+  bge-m3:
+    build:
+      context: ./bge-m3
+      dockerfile: Dockerfile
+    container_name: shared-bge-m3
+    ports:
+      - "8080:8080"
+    environment:
+      - MODEL_NAME=BAAI/bge-m3
+      - MAX_LENGTH=8192
+    volumes:
+      - bge_m3_cache:/root/.cache
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # Redis for caching (shared)
+  redis:
+    image: redis:7-alpine
+    container_name: shared-redis
+    ports:
+      - "6380:6379"  # Different port to avoid conflicts with project-specific Redis
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  # RAG API Server - serves all projects
+  rag-api:
+    build:
+      context: ../rag-api
+      dockerfile: Dockerfile
+    container_name: shared-rag-api
+    ports:
+      - "3100:3100"
+    environment:
+      - QDRANT_URL=http://qdrant:6333
+      - OLLAMA_URL=http://ollama:11434
+      - BGE_M3_URL=http://bge-m3:8080
+      - REDIS_URL=redis://redis:6379
+      - API_PORT=3100
+    depends_on:
+      - qdrant
+      - ollama
+      - bge-m3
+      - redis
+    restart: unless-stopped
+
+volumes:
+  qdrant_data:
+    name: shared_qdrant_data
+  ollama_data:
+    name: shared_ollama_data
+  bge_m3_cache:
+    name: shared_bge_m3_cache
+  redis_data:
+    name: shared_redis_data
+
+networks:
+  default:
+    name: shared-ai-network
