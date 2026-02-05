@@ -505,3 +505,250 @@ export async function getProjectStats(projectName: string): Promise<{
     languages: aggregated.languages,
   };
 }
+
+// ============================================
+// Zero-Downtime Reindexing
+// ============================================
+
+export interface ReindexOptions extends IndexOptions {
+  aliasName?: string; // If not provided, uses projectName_codebase
+}
+
+export interface ReindexResult extends IndexStats {
+  previousCollection?: string;
+  newCollection: string;
+  aliasSwapped: boolean;
+}
+
+/**
+ * Reindex a project with zero downtime using aliases
+ *
+ * Process:
+ * 1. Create new collection with timestamp suffix
+ * 2. Index all files to new collection
+ * 3. Atomically swap alias to new collection
+ * 4. Delete old collection
+ */
+export async function reindexWithZeroDowntime(options: ReindexOptions): Promise<ReindexResult> {
+  const {
+    projectName,
+    projectPath,
+    patterns = DEFAULT_PATTERNS,
+    excludePatterns = DEFAULT_EXCLUDE,
+    aliasName,
+  } = options;
+
+  const baseCollectionName = getCollectionName(projectName, 'codebase');
+  const alias = aliasName || baseCollectionName;
+  const timestamp = Date.now();
+  const newCollectionName = `${baseCollectionName}_${timestamp}`;
+
+  const startTime = Date.now();
+
+  logger.info(`Starting zero-downtime reindex for ${projectName}`, {
+    alias,
+    newCollection: newCollectionName,
+  });
+
+  // Initialize progress
+  indexProgress.set(projectName, {
+    status: 'indexing',
+    totalFiles: 0,
+    processedFiles: 0,
+    startedAt: new Date(),
+  });
+
+  const stats: ReindexResult = {
+    totalFiles: 0,
+    indexedFiles: 0,
+    totalChunks: 0,
+    errors: 0,
+    duration: 0,
+    newCollection: newCollectionName,
+    aliasSwapped: false,
+  };
+
+  try {
+    // Find current collection pointed by alias
+    const aliases = await vectorStore.listAliases();
+    const currentAlias = aliases.find(a => a.alias === alias);
+    stats.previousCollection = currentAlias?.collection;
+
+    // Find all files
+    const allFiles = walkDirectory(projectPath, patterns, excludePatterns, projectPath);
+    stats.totalFiles = allFiles.length;
+
+    indexProgress.get(projectName)!.totalFiles = allFiles.length;
+    logger.info(`Found ${allFiles.length} files to index`);
+
+    // Process files in batches with batch embedding
+    const fileBatchSize = 20;
+    const embeddingBatchSize = 100;
+
+    for (let i = 0; i < allFiles.length; i += fileBatchSize) {
+      const fileBatch = allFiles.slice(i, i + fileBatchSize);
+
+      interface ChunkInfo {
+        text: string;
+        relativePath: string;
+        language: string;
+        chunkIndex: number;
+        totalChunks: number;
+        startLine: number;
+        endLine: number;
+      }
+      const allChunks: ChunkInfo[] = [];
+
+      for (const filePath of fileBatch) {
+        try {
+          const content = fs.readFileSync(filePath, 'utf-8');
+          const relativePath = path.relative(projectPath, filePath);
+          const language = getLanguage(filePath);
+
+          const chunks = chunkCode(content);
+          const validChunks = chunks.filter(c => c.trim().length >= 10);
+
+          let lineOffset = 0;
+          for (let chunkIndex = 0; chunkIndex < validChunks.length; chunkIndex++) {
+            const chunkContent = validChunks[chunkIndex];
+            const lineCount = chunkContent.split('\n').length;
+
+            allChunks.push({
+              text: chunkContent,
+              relativePath,
+              language,
+              chunkIndex,
+              totalChunks: validChunks.length,
+              startLine: lineOffset + 1,
+              endLine: lineOffset + lineCount,
+            });
+
+            lineOffset += lineCount;
+          }
+
+          stats.indexedFiles++;
+        } catch (error) {
+          logger.warn(`Failed to read file: ${filePath}`, { error });
+          stats.errors++;
+        }
+      }
+
+      // Batch embed all chunks
+      if (allChunks.length > 0) {
+        const points: VectorPoint[] = [];
+
+        for (let j = 0; j < allChunks.length; j += embeddingBatchSize) {
+          const chunkBatch = allChunks.slice(j, j + embeddingBatchSize);
+          const texts = chunkBatch.map(c => c.text);
+
+          try {
+            const embeddings = await embeddingService.embedBatch(texts);
+
+            for (let k = 0; k < chunkBatch.length; k++) {
+              const chunk = chunkBatch[k];
+              points.push({
+                vector: embeddings[k],
+                payload: {
+                  file: chunk.relativePath,
+                  content: chunk.text,
+                  language: chunk.language,
+                  chunkIndex: chunk.chunkIndex,
+                  totalChunks: chunk.totalChunks,
+                  startLine: chunk.startLine,
+                  endLine: chunk.endLine,
+                  project: projectName,
+                  indexedAt: new Date().toISOString(),
+                },
+              });
+              stats.totalChunks++;
+            }
+          } catch (error) {
+            logger.error(`Batch embedding failed`, { error });
+            stats.errors++;
+          }
+        }
+
+        // Upsert to NEW collection
+        if (points.length > 0) {
+          await vectorStore.upsert(newCollectionName, points);
+        }
+      }
+
+      // Update progress
+      const progress = indexProgress.get(projectName)!;
+      progress.processedFiles = Math.min(i + fileBatchSize, allFiles.length);
+    }
+
+    // Atomic alias swap
+    if (stats.indexedFiles > 0) {
+      if (currentAlias) {
+        // Update existing alias to point to new collection
+        await vectorStore.updateAlias(alias, newCollectionName);
+      } else {
+        // Create new alias
+        await vectorStore.createAlias(alias, newCollectionName);
+      }
+      stats.aliasSwapped = true;
+
+      logger.info(`Alias ${alias} now points to ${newCollectionName}`);
+
+      // Delete old collection (if exists)
+      if (stats.previousCollection && stats.previousCollection !== newCollectionName) {
+        try {
+          await vectorStore.deleteCollection(stats.previousCollection);
+          logger.info(`Deleted old collection: ${stats.previousCollection}`);
+        } catch (error) {
+          logger.warn(`Failed to delete old collection: ${stats.previousCollection}`, { error });
+        }
+      }
+    }
+
+    stats.duration = Date.now() - startTime;
+
+    // Update progress
+    const progress = indexProgress.get(projectName)!;
+    progress.status = 'completed';
+    progress.completedAt = new Date();
+
+    // Invalidate cache
+    await cacheService.invalidateCollection(alias);
+
+    logger.info(`Zero-downtime reindex completed for ${projectName}`, { ...stats });
+    return stats;
+  } catch (error: any) {
+    const progress = indexProgress.get(projectName)!;
+    progress.status = 'error';
+    progress.error = error.message;
+
+    // Cleanup: delete new collection if alias wasn't swapped
+    if (!stats.aliasSwapped) {
+      try {
+        await vectorStore.deleteCollection(newCollectionName);
+      } catch {
+        // Ignore cleanup errors
+      }
+    }
+
+    logger.error(`Zero-downtime reindex failed for ${projectName}`, { error: error.message });
+    throw error;
+  }
+}
+
+/**
+ * Get alias info for a project
+ */
+export async function getAliasInfo(projectName: string): Promise<{
+  alias: string;
+  collection?: string;
+  exists: boolean;
+}> {
+  const alias = getCollectionName(projectName, 'codebase');
+  const aliases = await vectorStore.listAliases();
+  const found = aliases.find(a => a.alias === alias);
+
+  return {
+    alias,
+    collection: found?.collection,
+    exists: !!found,
+  };
+}

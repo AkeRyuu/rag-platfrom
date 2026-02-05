@@ -1121,6 +1121,252 @@ const TOOLS = [
       required: ["testCode"],
     },
   },
+  // ============================================
+  // Context & Session Tools
+  // ============================================
+  {
+    name: "summarize_context",
+    description: `Get a summary of current working context for ${PROJECT_NAME}. Shows recent tools, queries, and suggested next steps.`,
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        sessionId: {
+          type: "string",
+          description: "Optional session ID to filter context",
+        },
+      },
+    },
+  },
+  {
+    name: "summarize_changes",
+    description: `Summarize changes made during a coding session in ${PROJECT_NAME}. Shows tools used, files affected, and key actions.`,
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        sessionId: {
+          type: "string",
+          description: "Session ID to summarize (required)",
+        },
+        includeCode: {
+          type: "boolean",
+          description: "Include code snippets in summary (default: false)",
+          default: false,
+        },
+      },
+      required: ["sessionId"],
+    },
+  },
+  {
+    name: "analyze_usage_patterns",
+    description: `Analyze tool usage patterns to find efficiency opportunities for ${PROJECT_NAME}. Shows repeated queries, common workflows, and recommendations.`,
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        days: {
+          type: "number",
+          description: "Number of days to analyze (default: 7)",
+          default: 7,
+        },
+      },
+    },
+  },
+  // ============================================
+  // Zero-Downtime & Alias Tools
+  // ============================================
+  {
+    name: "reindex_zero_downtime",
+    description: `Reindex ${PROJECT_NAME} codebase with zero downtime using aliases. Creates new collection, indexes, then atomically swaps.`,
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        path: {
+          type: "string",
+          description: "Path to codebase (default: project path from env)",
+        },
+        patterns: {
+          type: "array",
+          items: { type: "string" },
+          description: "File patterns to include (e.g., ['**/*.ts', '**/*.py'])",
+        },
+        excludePatterns: {
+          type: "array",
+          items: { type: "string" },
+          description: "File patterns to exclude",
+        },
+      },
+    },
+  },
+  {
+    name: "list_aliases",
+    description: "List all collection aliases. Aliases allow atomic collection swapping for zero-downtime reindexing.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {},
+    },
+  },
+  // ============================================
+  // Clustering & Similarity Tools
+  // ============================================
+  {
+    name: "cluster_code",
+    description: `Find clusters of similar code in ${PROJECT_NAME}. Useful for identifying related implementations or potential abstractions.`,
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        seedIds: {
+          type: "array",
+          items: { type: "string" },
+          description: "Vector IDs to use as cluster seeds",
+        },
+        limit: {
+          type: "number",
+          description: "Max similar items per seed (default: 10)",
+          default: 10,
+        },
+        threshold: {
+          type: "number",
+          description: "Minimum similarity threshold 0-1 (default: 0.8)",
+          default: 0.8,
+        },
+      },
+      required: ["seedIds"],
+    },
+  },
+  {
+    name: "find_duplicates",
+    description: `Find potential duplicate or near-duplicate code in ${PROJECT_NAME}. Helps identify code that could be refactored.`,
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        limit: {
+          type: "number",
+          description: "Max vectors to check (default: 100)",
+          default: 100,
+        },
+        threshold: {
+          type: "number",
+          description: "Similarity threshold for duplicates 0-1 (default: 0.95)",
+          default: 0.95,
+        },
+      },
+    },
+  },
+  {
+    name: "recommend_similar",
+    description: `Get code recommendations based on positive and negative examples in ${PROJECT_NAME}. "More like this, less like that."`,
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        positiveIds: {
+          type: "array",
+          items: { type: "string" },
+          description: "Vector IDs of code you want more of",
+        },
+        negativeIds: {
+          type: "array",
+          items: { type: "string" },
+          description: "Vector IDs of code you want less of (optional)",
+        },
+        limit: {
+          type: "number",
+          description: "Max results (default: 10)",
+          default: 10,
+        },
+      },
+      required: ["positiveIds"],
+    },
+  },
+  // ============================================
+  // Learning Extraction & Batch Memory Tools
+  // ============================================
+  {
+    name: "extract_learnings",
+    description: `Extract valuable learnings, decisions, and insights from text or conversation for ${PROJECT_NAME}. Uses AI to identify what should be remembered.`,
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        text: {
+          type: "string",
+          description: "Text or conversation to analyze",
+        },
+        context: {
+          type: "string",
+          description: "Additional context to help with extraction",
+        },
+        autoSave: {
+          type: "boolean",
+          description: "Automatically save extracted learnings to memory (default: false)",
+          default: false,
+        },
+        minConfidence: {
+          type: "number",
+          description: "Minimum confidence threshold 0-1 (default: 0.6)",
+          default: 0.6,
+        },
+      },
+      required: ["text"],
+    },
+  },
+  {
+    name: "batch_remember",
+    description: `Efficiently store multiple memories at once in ${PROJECT_NAME}. Faster than individual remember calls.`,
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        items: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              content: { type: "string", description: "Content to remember" },
+              type: {
+                type: "string",
+                enum: ["decision", "insight", "context", "todo", "conversation", "note"],
+                description: "Memory type (default: note)",
+              },
+              tags: { type: "array", items: { type: "string" }, description: "Tags for categorization" },
+              relatedTo: { type: "string", description: "Related feature or topic" },
+            },
+            required: ["content"],
+          },
+          description: "Array of memories to store",
+        },
+      },
+      required: ["items"],
+    },
+  },
+  {
+    name: "validate_memory",
+    description: `Validate or reject an auto-extracted memory in ${PROJECT_NAME}. Helps improve future extraction accuracy.`,
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        memoryId: {
+          type: "string",
+          description: "ID of the memory to validate",
+        },
+        validated: {
+          type: "boolean",
+          description: "true to confirm the memory is valuable, false to reject it",
+        },
+      },
+      required: ["memoryId", "validated"],
+    },
+  },
+  {
+    name: "review_memories",
+    description: `Get auto-extracted memories pending review in ${PROJECT_NAME}. Shows unvalidated learnings that need human confirmation.`,
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        limit: {
+          type: "number",
+          description: "Max memories to return (default: 20)",
+          default: 20,
+        },
+      },
+    },
+  },
 ];
 
 // Tool handlers
@@ -3327,6 +3573,449 @@ ${transitions ? `### State Transitions\n${transitions}` : ""}`;
             result += `- ${t}\n`;
           });
         }
+
+        return result;
+      }
+
+      // ============================================
+      // Context & Session Tools
+      // ============================================
+
+      case "summarize_context": {
+        const { sessionId } = args as {
+          sessionId?: string;
+        };
+
+        const params = new URLSearchParams();
+        if (sessionId) params.set("sessionId", sessionId);
+
+        const response = await api.get(
+          `/api/context/${PROJECT_NAME}${params.toString() ? "?" + params.toString() : ""}`
+        );
+
+        const { recentTools, recentQueries, activeFeatures, suggestedNextSteps } = response.data;
+
+        let result = `# 📋 Current Context for ${PROJECT_NAME}\n\n`;
+
+        if (recentTools && recentTools.length > 0) {
+          result += `## Recently Used Tools\n`;
+          recentTools.forEach((t: { tool: string; count: number }) => {
+            result += `- **${t.tool}**: ${t.count} calls\n`;
+          });
+          result += "\n";
+        }
+
+        if (activeFeatures && activeFeatures.length > 0) {
+          result += `## Active Features\n`;
+          activeFeatures.forEach((f: string) => {
+            result += `- ${f}\n`;
+          });
+          result += "\n";
+        }
+
+        if (recentQueries && recentQueries.length > 0) {
+          result += `## Recent Queries\n`;
+          recentQueries.slice(0, 5).forEach((q: string) => {
+            result += `- ${q.slice(0, 80)}${q.length > 80 ? "..." : ""}\n`;
+          });
+          result += "\n";
+        }
+
+        if (suggestedNextSteps && suggestedNextSteps.length > 0) {
+          result += `## 💡 Suggested Next Steps\n`;
+          suggestedNextSteps.forEach((s: string) => {
+            result += `- ${s}\n`;
+          });
+        }
+
+        return result;
+      }
+
+      case "summarize_changes": {
+        const { sessionId, includeCode } = args as {
+          sessionId: string;
+          includeCode?: boolean;
+        };
+
+        const params = new URLSearchParams();
+        if (includeCode) params.set("includeCode", "true");
+
+        const response = await api.get(
+          `/api/changes/${PROJECT_NAME}/${sessionId}${params.toString() ? "?" + params.toString() : ""}`
+        );
+
+        const { summary, toolsUsed, filesAffected, keyActions, duration } = response.data;
+
+        let result = `# 📝 Session Summary\n\n`;
+        result += `**Summary**: ${summary}\n\n`;
+        result += `**Duration**: ${Math.round(duration / 60000)} minutes\n\n`;
+
+        if (toolsUsed && toolsUsed.length > 0) {
+          result += `## Tools Used\n`;
+          toolsUsed.forEach((t: string) => {
+            result += `- ${t}\n`;
+          });
+          result += "\n";
+        }
+
+        if (filesAffected && filesAffected.length > 0) {
+          result += `## Files Affected\n`;
+          filesAffected.slice(0, 10).forEach((f: string) => {
+            result += `- ${f}\n`;
+          });
+          if (filesAffected.length > 10) {
+            result += `- ... and ${filesAffected.length - 10} more files\n`;
+          }
+          result += "\n";
+        }
+
+        if (keyActions && keyActions.length > 0) {
+          result += `## Key Actions\n`;
+          keyActions.forEach((a: string) => {
+            result += `- ${a}\n`;
+          });
+        }
+
+        return result;
+      }
+
+      case "analyze_usage_patterns": {
+        const { days = 7 } = args as {
+          days?: number;
+        };
+
+        const response = await api.get(`/api/patterns/${PROJECT_NAME}?days=${days}`);
+        const { patterns, workflows, insights, recommendations } = response.data;
+
+        let result = `# 📊 Usage Pattern Analysis (${days} days)\n\n`;
+
+        if (insights && insights.length > 0) {
+          result += `## 💡 Insights\n`;
+          insights.forEach((i: string) => {
+            result += `- ${i}\n`;
+          });
+          result += "\n";
+        }
+
+        if (workflows && workflows.length > 0) {
+          result += `## Common Workflows\n`;
+          workflows.slice(0, 5).forEach((w: { tools: string[]; count: number; successRate: number }) => {
+            result += `- ${w.tools.join(" → ")} (${w.count}x, ${(w.successRate * 100).toFixed(0)}% success)\n`;
+          });
+          result += "\n";
+        }
+
+        if (patterns && patterns.length > 0) {
+          result += `## Detected Patterns\n`;
+          patterns.slice(0, 5).forEach((p: { type: string; description: string; suggestion?: string }) => {
+            result += `- **${p.type}**: ${p.description}\n`;
+            if (p.suggestion) result += `  - Suggestion: ${p.suggestion}\n`;
+          });
+          result += "\n";
+        }
+
+        if (recommendations && recommendations.length > 0) {
+          result += `## 🎯 Recommendations\n`;
+          recommendations.forEach((r: string) => {
+            result += `- ${r}\n`;
+          });
+        }
+
+        return result;
+      }
+
+      // ============================================
+      // Zero-Downtime & Alias Tools
+      // ============================================
+
+      case "reindex_zero_downtime": {
+        const { path, patterns, excludePatterns } = args as {
+          path?: string;
+          patterns?: string[];
+          excludePatterns?: string[];
+        };
+
+        const response = await api.post("/api/reindex", {
+          path: path || PROJECT_PATH,
+          patterns,
+          excludePatterns,
+        });
+
+        return `🔄 Zero-downtime reindex started for ${PROJECT_NAME}\n\n` +
+          `- **Alias**: ${response.data.alias}\n` +
+          `- **Status**: ${response.data.status}\n` +
+          `- **Message**: ${response.data.message}\n\n` +
+          `The codebase will remain searchable during reindexing. The alias will be atomically swapped once complete.`;
+      }
+
+      case "list_aliases": {
+        const response = await api.get("/api/aliases");
+        const { aliases } = response.data;
+
+        if (aliases.length === 0) {
+          return "No collection aliases found. Create one using `reindex_zero_downtime`.";
+        }
+
+        let result = `# 🔗 Collection Aliases\n\n`;
+        aliases.forEach((a: { alias: string; collection: string }) => {
+          result += `- **${a.alias}** → ${a.collection}\n`;
+        });
+
+        return result;
+      }
+
+      // ============================================
+      // Clustering & Similarity Tools
+      // ============================================
+
+      case "cluster_code": {
+        const { seedIds, limit = 10, threshold = 0.8 } = args as {
+          seedIds: string[];
+          limit?: number;
+          threshold?: number;
+        };
+
+        const response = await api.post("/api/clusters", {
+          collection: `${PROJECT_NAME}_codebase`,
+          seedIds,
+          limit,
+          threshold,
+        });
+
+        const { clusters } = response.data;
+
+        if (clusters.length === 0) {
+          return "No clusters found for the given seeds.";
+        }
+
+        let result = `# 🔍 Code Clusters\n\n`;
+        clusters.forEach((c: { seedId: string; similar: Array<{ id: string; score: number; payload: any }> }) => {
+          result += `## Seed: ${c.seedId}\n`;
+          if (c.similar.length === 0) {
+            result += `No similar code found.\n\n`;
+          } else {
+            c.similar.forEach((s) => {
+              result += `- **${s.payload.file}** (score: ${s.score.toFixed(3)})\n`;
+              const preview = (s.payload.content as string)?.slice(0, 100) || '';
+              result += `  \`${preview}...\`\n`;
+            });
+            result += "\n";
+          }
+        });
+
+        return result;
+      }
+
+      case "find_duplicates": {
+        const { limit = 100, threshold = 0.95 } = args as {
+          limit?: number;
+          threshold?: number;
+        };
+
+        const response = await api.post("/api/duplicates", {
+          collection: `${PROJECT_NAME}_codebase`,
+          limit,
+          threshold,
+        });
+
+        const { duplicates, totalGroups } = response.data;
+
+        if (totalGroups === 0) {
+          return `No duplicate code found in ${PROJECT_NAME} (threshold: ${threshold}).`;
+        }
+
+        let result = `# 🔁 Potential Duplicates (${totalGroups} groups)\n\n`;
+        duplicates.slice(0, 10).forEach((d: { files: Array<{ file: string; content: string }>; similarity: number }, i: number) => {
+          result += `## Group ${i + 1} (similarity: ${(d.similarity * 100).toFixed(1)}%)\n`;
+          d.files.forEach((f) => {
+            result += `- **${f.file}**\n`;
+            if (f.content) {
+              result += `  \`${f.content.slice(0, 80)}...\`\n`;
+            }
+          });
+          result += "\n";
+        });
+
+        if (totalGroups > 10) {
+          result += `... and ${totalGroups - 10} more groups.\n`;
+        }
+
+        return result;
+      }
+
+      case "recommend_similar": {
+        const { positiveIds, negativeIds = [], limit = 10 } = args as {
+          positiveIds: string[];
+          negativeIds?: string[];
+          limit?: number;
+        };
+
+        const response = await api.post("/api/recommend", {
+          collection: `${PROJECT_NAME}_codebase`,
+          positiveIds,
+          negativeIds,
+          limit,
+        });
+
+        const { results } = response.data;
+
+        if (results.length === 0) {
+          return "No recommendations found for the given examples.";
+        }
+
+        let result = `# 🎯 Code Recommendations\n\n`;
+        result += `Based on ${positiveIds.length} positive${negativeIds.length > 0 ? ` and ${negativeIds.length} negative` : ""} examples:\n\n`;
+
+        results.forEach((r: { id: string; file: string; content: string; score: number }) => {
+          result += `- **${r.file}** (score: ${r.score.toFixed(3)})\n`;
+          const preview = r.content?.slice(0, 100) || '';
+          result += `  \`${preview}...\`\n`;
+        });
+
+        return result;
+      }
+
+      // ============================================
+      // Learning Extraction & Batch Memory Handlers
+      // ============================================
+
+      case "extract_learnings": {
+        const { text, context, autoSave = false, minConfidence = 0.6 } = args as {
+          text: string;
+          context?: string;
+          autoSave?: boolean;
+          minConfidence?: number;
+        };
+
+        const response = await api.post("/api/memory/extract", {
+          text,
+          context,
+          autoSave,
+          minConfidence,
+        });
+
+        const { learnings, entities, summary, savedCount } = response.data;
+
+        let result = `# 🧠 Extracted Learnings\n\n`;
+        result += `**Summary**: ${summary}\n\n`;
+
+        if (learnings && learnings.length > 0) {
+          result += `## Learnings (${learnings.length})\n\n`;
+          learnings.forEach((l: { type: string; content: string; confidence: number; tags: string[]; reasoning: string }) => {
+            result += `### ${l.type.toUpperCase()} (confidence: ${(l.confidence * 100).toFixed(0)}%)\n`;
+            result += `${l.content}\n`;
+            if (l.tags && l.tags.length > 0) {
+              result += `Tags: ${l.tags.join(', ')}\n`;
+            }
+            result += `_Reason: ${l.reasoning}_\n\n`;
+          });
+        } else {
+          result += `No significant learnings extracted (confidence threshold: ${minConfidence}).\n\n`;
+        }
+
+        if (entities) {
+          result += `## Entities Detected\n`;
+          if (entities.files && entities.files.length > 0) {
+            result += `- **Files**: ${entities.files.join(', ')}\n`;
+          }
+          if (entities.functions && entities.functions.length > 0) {
+            result += `- **Functions**: ${entities.functions.join(', ')}\n`;
+          }
+          if (entities.concepts && entities.concepts.length > 0) {
+            result += `- **Concepts**: ${entities.concepts.join(', ')}\n`;
+          }
+        }
+
+        if (autoSave && savedCount > 0) {
+          result += `\n✅ ${savedCount} learnings saved to memory.\n`;
+        }
+
+        return result;
+      }
+
+      case "batch_remember": {
+        const { items } = args as {
+          items: Array<{
+            content: string;
+            type?: string;
+            tags?: string[];
+            relatedTo?: string;
+          }>;
+        };
+
+        const response = await api.post("/api/memory/batch", {
+          items,
+        });
+
+        const { savedCount, errors, memories } = response.data;
+
+        let result = `# 📦 Batch Memory Result\n\n`;
+        result += `**Saved**: ${savedCount} memories\n\n`;
+
+        if (memories && memories.length > 0) {
+          result += `## Stored Memories\n`;
+          memories.forEach((m: { id: string; type: string; content: string }) => {
+            result += `- [${m.type}] ${m.content.slice(0, 80)}${m.content.length > 80 ? '...' : ''}\n`;
+            result += `  ID: \`${m.id}\`\n`;
+          });
+        }
+
+        if (errors && errors.length > 0) {
+          result += `\n## ⚠️ Errors\n`;
+          errors.forEach((e: string) => {
+            result += `- ${e}\n`;
+          });
+        }
+
+        return result;
+      }
+
+      case "validate_memory": {
+        const { memoryId, validated } = args as {
+          memoryId: string;
+          validated: boolean;
+        };
+
+        const response = await api.patch(`/api/memory/${memoryId}/validate`, {
+          validated,
+        });
+
+        const { memory } = response.data;
+
+        return `✅ Memory ${validated ? 'validated' : 'rejected'}\n\n` +
+          `- **ID**: ${memory.id}\n` +
+          `- **Type**: ${memory.type}\n` +
+          `- **Content**: ${memory.content.slice(0, 100)}${memory.content.length > 100 ? '...' : ''}\n` +
+          `- **Validated**: ${memory.validated}`;
+      }
+
+      case "review_memories": {
+        const { limit = 20 } = args as {
+          limit?: number;
+        };
+
+        const response = await api.get(`/api/memory/unvalidated?limit=${limit}`);
+        const { memories, count } = response.data;
+
+        if (count === 0) {
+          return "No unvalidated memories to review. All auto-extracted learnings have been reviewed.";
+        }
+
+        let result = `# 📋 Memories Pending Review (${count})\n\n`;
+        result += `These are auto-extracted learnings that need validation.\n\n`;
+
+        memories.forEach((m: { id: string; type: string; content: string; confidence: number; source: string; tags: string[] }, i: number) => {
+          result += `## ${i + 1}. ${m.type.toUpperCase()}\n`;
+          result += `**ID**: \`${m.id}\`\n`;
+          result += `**Confidence**: ${((m.confidence || 0) * 100).toFixed(0)}%\n`;
+          result += `**Source**: ${m.source || 'unknown'}\n`;
+          result += `**Content**: ${m.content}\n`;
+          if (m.tags && m.tags.length > 0) {
+            result += `**Tags**: ${m.tags.join(', ')}\n`;
+          }
+          result += `\nTo validate: \`validate_memory(memoryId="${m.id}", validated=true)\`\n`;
+          result += `To reject: \`validate_memory(memoryId="${m.id}", validated=false)\`\n\n`;
+        });
 
         return result;
       }

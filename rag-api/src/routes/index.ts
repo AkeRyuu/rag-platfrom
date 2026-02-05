@@ -3,9 +3,17 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { indexProject, getIndexStatus, getProjectStats, getCollectionName } from '../services/indexer';
+import {
+  indexProject,
+  getIndexStatus,
+  getProjectStats,
+  getCollectionName,
+  reindexWithZeroDowntime,
+  getAliasInfo,
+} from '../services/indexer';
 import { vectorStore } from '../services/vector-store';
 import { confluenceService } from '../services/confluence';
+import { usagePatterns } from '../services/usage-patterns';
 import { logger } from '../utils/logger';
 
 const router = Router();
@@ -230,6 +238,222 @@ router.get('/collections/:name/info', async (req: Request, res: Response) => {
   } catch (error: any) {
     logger.error('Failed to get collection info', { error: error.message });
     res.status(500).json({ error: 'Failed to get collection info' });
+  }
+});
+
+// ============================================
+// Zero-Downtime Reindex Routes
+// ============================================
+
+/**
+ * Reindex with zero downtime using aliases
+ * POST /api/reindex
+ */
+router.post('/reindex', async (req: Request, res: Response) => {
+  try {
+    const projectName = req.headers['x-project-name'] as string || req.body.projectName;
+    const projectPath = req.headers['x-project-path'] as string || req.body.path;
+    const { patterns, excludePatterns, aliasName } = req.body;
+
+    if (!projectName || !projectPath) {
+      return res.status(400).json({
+        error: 'projectName and path are required (via headers or body)',
+      });
+    }
+
+    // Check if already indexing
+    const status = getIndexStatus(projectName);
+    if (status.status === 'indexing') {
+      return res.json({
+        status: 'already_indexing',
+        progress: status,
+      });
+    }
+
+    // Start reindexing in background
+    reindexWithZeroDowntime({
+      projectName,
+      projectPath,
+      patterns,
+      excludePatterns,
+      aliasName,
+    }).catch(error => {
+      logger.error(`Zero-downtime reindex failed for ${projectName}`, { error: error.message });
+    });
+
+    res.json({
+      status: 'started',
+      message: `Zero-downtime reindexing started for ${projectName}`,
+      alias: aliasName || getCollectionName(projectName),
+    });
+  } catch (error: any) {
+    logger.error('Failed to start reindexing', { error: error.message });
+    res.status(500).json({ error: 'Failed to start reindexing' });
+  }
+});
+
+/**
+ * Get alias info for a project
+ * GET /api/alias/:project
+ */
+router.get('/alias/:project', async (req: Request, res: Response) => {
+  try {
+    const { project } = req.params;
+    const info = await getAliasInfo(project);
+    res.json(info);
+  } catch (error: any) {
+    logger.error('Failed to get alias info', { error: error.message });
+    res.status(500).json({ error: 'Failed to get alias info' });
+  }
+});
+
+/**
+ * List all aliases
+ * GET /api/aliases
+ */
+router.get('/aliases', async (req: Request, res: Response) => {
+  try {
+    const aliases = await vectorStore.listAliases();
+    res.json({ aliases });
+  } catch (error: any) {
+    logger.error('Failed to list aliases', { error: error.message });
+    res.status(500).json({ error: 'Failed to list aliases' });
+  }
+});
+
+// ============================================
+// Clustering & Similarity Routes
+// ============================================
+
+/**
+ * Find code clusters based on seed IDs
+ * POST /api/clusters
+ */
+router.post('/clusters', async (req: Request, res: Response) => {
+  try {
+    const { collection, seedIds, limit = 10, threshold = 0.8 } = req.body;
+
+    if (!collection || !seedIds || !Array.isArray(seedIds)) {
+      return res.status(400).json({ error: 'collection and seedIds array are required' });
+    }
+
+    const clusters = await vectorStore.findClusters(collection, seedIds, limit, threshold);
+    res.json({ clusters });
+  } catch (error: any) {
+    logger.error('Failed to find clusters', { error: error.message });
+    res.status(500).json({ error: 'Failed to find clusters' });
+  }
+});
+
+/**
+ * Find duplicate code in a collection
+ * POST /api/duplicates
+ */
+router.post('/duplicates', async (req: Request, res: Response) => {
+  try {
+    const { collection, limit = 100, threshold = 0.95 } = req.body;
+
+    if (!collection) {
+      return res.status(400).json({ error: 'collection is required' });
+    }
+
+    const duplicates = await vectorStore.findDuplicates(collection, limit, threshold);
+    res.json({
+      duplicates: duplicates.map(d => ({
+        files: d.group.map(g => ({
+          id: g.id,
+          file: g.payload.file,
+          content: (g.payload.content as string)?.slice(0, 200),
+        })),
+        similarity: d.similarity,
+      })),
+      totalGroups: duplicates.length,
+    });
+  } catch (error: any) {
+    logger.error('Failed to find duplicates', { error: error.message });
+    res.status(500).json({ error: 'Failed to find duplicates' });
+  }
+});
+
+/**
+ * Get recommendations based on positive/negative examples
+ * POST /api/recommend
+ */
+router.post('/recommend', async (req: Request, res: Response) => {
+  try {
+    const { collection, positiveIds, negativeIds = [], limit = 10 } = req.body;
+
+    if (!collection || !positiveIds || !Array.isArray(positiveIds)) {
+      return res.status(400).json({ error: 'collection and positiveIds array are required' });
+    }
+
+    const results = await vectorStore.recommend(collection, positiveIds, negativeIds, limit);
+    res.json({
+      results: results.map(r => ({
+        id: r.id,
+        file: r.payload.file,
+        content: r.payload.content,
+        score: r.score,
+      })),
+    });
+  } catch (error: any) {
+    logger.error('Failed to get recommendations', { error: error.message });
+    res.status(500).json({ error: 'Failed to get recommendations' });
+  }
+});
+
+// ============================================
+// Usage Patterns Routes
+// ============================================
+
+/**
+ * Analyze usage patterns
+ * GET /api/patterns/:project
+ */
+router.get('/patterns/:project', async (req: Request, res: Response) => {
+  try {
+    const { project } = req.params;
+    const days = parseInt(req.query.days as string) || 7;
+
+    const analysis = await usagePatterns.analyzePatterns(project, days);
+    res.json(analysis);
+  } catch (error: any) {
+    logger.error('Failed to analyze patterns', { error: error.message });
+    res.status(500).json({ error: 'Failed to analyze patterns' });
+  }
+});
+
+/**
+ * Summarize current context
+ * GET /api/context/:project
+ */
+router.get('/context/:project', async (req: Request, res: Response) => {
+  try {
+    const { project } = req.params;
+    const sessionId = req.query.sessionId as string | undefined;
+
+    const summary = await usagePatterns.summarizeContext(project, sessionId);
+    res.json(summary);
+  } catch (error: any) {
+    logger.error('Failed to summarize context', { error: error.message });
+    res.status(500).json({ error: 'Failed to summarize context' });
+  }
+});
+
+/**
+ * Summarize changes in a session
+ * GET /api/changes/:project/:sessionId
+ */
+router.get('/changes/:project/:sessionId', async (req: Request, res: Response) => {
+  try {
+    const { project, sessionId } = req.params;
+    const includeCode = req.query.includeCode === 'true';
+
+    const summary = await usagePatterns.summarizeChanges(project, sessionId, { includeCode });
+    res.json(summary);
+  } catch (error: any) {
+    logger.error('Failed to summarize changes', { error: error.message });
+    res.status(500).json({ error: 'Failed to summarize changes' });
   }
 });
 

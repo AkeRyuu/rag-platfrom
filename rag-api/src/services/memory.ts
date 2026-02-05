@@ -313,6 +313,166 @@ class MemoryService {
       },
     };
   }
+
+  /**
+   * Batch remember - store multiple memories efficiently
+   */
+  async batchRemember(
+    projectName: string,
+    items: Array<Omit<CreateMemoryOptions, 'projectName'>>
+  ): Promise<{ saved: Memory[]; errors: string[] }> {
+    const collectionName = this.getCollectionName(projectName);
+    const saved: Memory[] = [];
+    const errors: string[] = [];
+
+    // Create all memories and embeddings in batch
+    const memories: Memory[] = [];
+    const textsToEmbed: string[] = [];
+
+    for (const item of items) {
+      const { content, type = 'note', tags = [], relatedTo, metadata } = item;
+
+      const memory: Memory = {
+        id: uuidv4(),
+        type,
+        content,
+        tags,
+        relatedTo,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        metadata,
+      };
+
+      if (type === 'todo') {
+        memory.status = 'pending';
+        memory.statusHistory = [{ status: 'pending', timestamp: memory.createdAt }];
+      }
+
+      memories.push(memory);
+      textsToEmbed.push(
+        `${type}: ${content}${relatedTo ? ` (related to: ${relatedTo})` : ''}${tags.length > 0 ? ` [tags: ${tags.join(', ')}]` : ''}`
+      );
+    }
+
+    try {
+      // Batch embed all texts
+      const embeddings = await embeddingService.embedBatch(textsToEmbed);
+
+      // Create points
+      const points: VectorPoint[] = memories.map((memory, i) => ({
+        id: memory.id,
+        vector: embeddings[i],
+        payload: {
+          ...memory,
+          project: projectName,
+        },
+      }));
+
+      // Batch upsert
+      await vectorStore.upsert(collectionName, points);
+      saved.push(...memories);
+
+      logger.info(`Batch remember: ${saved.length} memories saved`, { projectName });
+    } catch (error: any) {
+      errors.push(`Batch operation failed: ${error.message}`);
+      logger.error('Batch remember failed', { error: error.message, projectName });
+    }
+
+    return { saved, errors };
+  }
+
+  /**
+   * Validate auto-extracted memory (mark as user-validated)
+   */
+  async validateMemory(projectName: string, memoryId: string, validated: boolean): Promise<Memory | null> {
+    const collectionName = this.getCollectionName(projectName);
+
+    // Find the memory
+    const results = await this.recall({
+      projectName,
+      query: memoryId,
+      limit: 1,
+    });
+
+    if (results.length === 0) {
+      return null;
+    }
+
+    const memory = results[0].memory;
+    const updatedMemory: Memory = {
+      ...memory,
+      validated,
+      updatedAt: new Date().toISOString(),
+      metadata: {
+        ...memory.metadata,
+        validatedAt: new Date().toISOString(),
+      },
+    };
+
+    // Re-embed and update
+    const embedding = await embeddingService.embed(
+      `${updatedMemory.type}: ${updatedMemory.content}${updatedMemory.relatedTo ? ` (related to: ${updatedMemory.relatedTo})` : ''}`
+    );
+
+    const point: VectorPoint = {
+      id: updatedMemory.id,
+      vector: embedding,
+      payload: {
+        ...updatedMemory,
+        project: projectName,
+      },
+    };
+
+    await vectorStore.upsert(collectionName, [point]);
+    logger.info(`Memory validated: ${memoryId} = ${validated}`, { projectName });
+
+    return updatedMemory;
+  }
+
+  /**
+   * Get unvalidated auto-extracted memories for review
+   */
+  async getUnvalidatedMemories(projectName: string, limit: number = 20): Promise<Memory[]> {
+    const collectionName = this.getCollectionName(projectName);
+
+    try {
+      // Search for memories that were auto-extracted and not yet validated
+      const embedding = await embeddingService.embed('auto extracted memories unvalidated');
+
+      const results = await vectorStore.search(
+        collectionName,
+        embedding,
+        limit * 2, // Get more to filter
+        {
+          must: [
+            { key: 'validated', match: { value: false } },
+          ],
+        }
+      );
+
+      return results
+        .filter(r => r.payload.source && (r.payload.source as string).startsWith('auto_'))
+        .slice(0, limit)
+        .map(r => ({
+          id: r.id,
+          type: r.payload.type as MemoryType,
+          content: r.payload.content as string,
+          tags: (r.payload.tags as string[]) || [],
+          relatedTo: r.payload.relatedTo as string | undefined,
+          createdAt: r.payload.createdAt as string,
+          updatedAt: r.payload.updatedAt as string,
+          metadata: r.payload.metadata as Record<string, unknown> | undefined,
+          source: r.payload.source as MemorySource,
+          confidence: r.payload.confidence as number,
+          validated: r.payload.validated as boolean,
+        }));
+    } catch (error: any) {
+      if (error.status === 404) {
+        return [];
+      }
+      throw error;
+    }
+  }
 }
 
 export const memoryService = new MemoryService();

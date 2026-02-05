@@ -4,6 +4,7 @@
 
 import { Router, Request, Response } from 'express';
 import { memoryService, MemoryType, TodoStatus } from '../services/memory';
+import { conversationAnalyzer } from '../services/conversation-analyzer';
 import { logger } from '../utils/logger';
 
 const router = Router();
@@ -193,6 +194,126 @@ router.get('/memory/stats', async (req: Request, res: Response) => {
     res.json({ stats });
   } catch (error: any) {
     logger.error('Failed to get memory stats', { error: error.message });
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ============================================
+// Batch & Auto-learning Routes
+// ============================================
+
+/**
+ * Batch store memories
+ * POST /api/memory/batch
+ */
+router.post('/memory/batch', async (req: Request, res: Response) => {
+  try {
+    const projectName = req.headers['x-project-name'] as string || req.body.projectName;
+    const { items } = req.body;
+
+    if (!projectName) {
+      return res.status(400).json({ error: 'projectName is required' });
+    }
+    if (!items || !Array.isArray(items)) {
+      return res.status(400).json({ error: 'items array is required' });
+    }
+
+    const result = await memoryService.batchRemember(projectName, items);
+    res.json({
+      success: result.errors.length === 0,
+      savedCount: result.saved.length,
+      memories: result.saved,
+      errors: result.errors,
+    });
+  } catch (error: any) {
+    logger.error('Failed to batch store memories', { error: error.message });
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * Extract learnings from text/conversation
+ * POST /api/memory/extract
+ */
+router.post('/memory/extract', async (req: Request, res: Response) => {
+  try {
+    const projectName = req.headers['x-project-name'] as string || req.body.projectName;
+    const { text, context, autoSave = false, minConfidence = 0.6 } = req.body;
+
+    if (!projectName) {
+      return res.status(400).json({ error: 'projectName is required' });
+    }
+    if (!text) {
+      return res.status(400).json({ error: 'text is required' });
+    }
+
+    const analysis = await conversationAnalyzer.analyze({
+      projectName,
+      conversation: text,
+      context,
+      autoSave,
+      minConfidence,
+    });
+
+    res.json({
+      learnings: analysis.learnings,
+      entities: analysis.entities,
+      summary: analysis.summary,
+      savedCount: autoSave ? analysis.learnings.length : 0,
+    });
+  } catch (error: any) {
+    logger.error('Failed to extract learnings', { error: error.message });
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * Validate an auto-extracted memory
+ * PATCH /api/memory/:id/validate
+ */
+router.patch('/memory/:id/validate', async (req: Request, res: Response) => {
+  try {
+    const projectName = req.headers['x-project-name'] as string || req.body.projectName;
+    const { id } = req.params;
+    const { validated } = req.body;
+
+    if (!projectName) {
+      return res.status(400).json({ error: 'projectName is required' });
+    }
+    if (validated === undefined) {
+      return res.status(400).json({ error: 'validated (true/false) is required' });
+    }
+
+    const memory = await memoryService.validateMemory(projectName, id, validated);
+
+    if (!memory) {
+      return res.status(404).json({ error: 'Memory not found' });
+    }
+
+    res.json({ success: true, memory });
+  } catch (error: any) {
+    logger.error('Failed to validate memory', { error: error.message });
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * Get unvalidated auto-extracted memories for review
+ * GET /api/memory/unvalidated
+ */
+router.get('/memory/unvalidated', async (req: Request, res: Response) => {
+  try {
+    const projectName = req.headers['x-project-name'] as string || req.query.projectName as string;
+    const limit = parseInt(req.query.limit as string) || 20;
+
+    if (!projectName) {
+      return res.status(400).json({ error: 'projectName is required' });
+    }
+
+    const memories = await memoryService.getUnvalidatedMemories(projectName, limit);
+    res.json({ memories, count: memories.length });
+  } catch (error: any) {
+    logger.error('Failed to get unvalidated memories', { error: error.message });
     res.status(500).json({ error: error.message });
   }
 });

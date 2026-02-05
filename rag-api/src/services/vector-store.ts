@@ -556,6 +556,236 @@ class VectorStoreService {
       }
     }
   }
+
+  // ============================================
+  // Alias Management (for zero-downtime operations)
+  // ============================================
+
+  /**
+   * Create an alias for a collection
+   */
+  async createAlias(aliasName: string, collectionName: string): Promise<void> {
+    try {
+      await this.client.updateCollectionAliases({
+        actions: [
+          { create_alias: { alias_name: aliasName, collection_name: collectionName } },
+        ],
+      });
+      logger.info(`Created alias: ${aliasName} -> ${collectionName}`);
+    } catch (error: any) {
+      logger.error(`Failed to create alias: ${aliasName}`, { error: error.message });
+      throw error;
+    }
+  }
+
+  /**
+   * Update an alias to point to a different collection (atomic swap)
+   */
+  async updateAlias(aliasName: string, newCollectionName: string): Promise<void> {
+    try {
+      // Get current collection for the alias
+      const collections = await this.client.getCollections();
+      const currentCollection = collections.collections.find(c =>
+        c.name === aliasName || (c as any).aliases?.includes(aliasName)
+      );
+
+      // Atomic swap: delete old alias and create new one in single operation
+      const actions: any[] = [
+        { create_alias: { alias_name: aliasName, collection_name: newCollectionName } },
+      ];
+
+      await this.client.updateCollectionAliases({ actions });
+      logger.info(`Updated alias: ${aliasName} -> ${newCollectionName}`);
+    } catch (error: any) {
+      logger.error(`Failed to update alias: ${aliasName}`, { error: error.message });
+      throw error;
+    }
+  }
+
+  /**
+   * Delete an alias
+   */
+  async deleteAlias(aliasName: string): Promise<void> {
+    try {
+      await this.client.updateCollectionAliases({
+        actions: [
+          { delete_alias: { alias_name: aliasName } },
+        ],
+      });
+      logger.info(`Deleted alias: ${aliasName}`);
+    } catch (error: any) {
+      logger.error(`Failed to delete alias: ${aliasName}`, { error: error.message });
+      throw error;
+    }
+  }
+
+  /**
+   * List all aliases across all collections
+   */
+  async listAliases(): Promise<{ alias: string; collection: string }[]> {
+    try {
+      const aliases: { alias: string; collection: string }[] = [];
+      const collections = await this.client.getCollections();
+
+      // Get aliases for each collection
+      for (const collection of collections.collections) {
+        const response = await this.client.getCollectionAliases(collection.name);
+        for (const alias of response.aliases || []) {
+          aliases.push({
+            alias: (alias as any).alias_name,
+            collection: collection.name,
+          });
+        }
+      }
+
+      return aliases;
+    } catch (error: any) {
+      logger.error('Failed to list aliases', { error: error.message });
+      return [];
+    }
+  }
+
+  // ============================================
+  // Clustering & Similarity Analysis
+  // ============================================
+
+  /**
+   * Find clusters of similar vectors
+   */
+  async findClusters(
+    collection: string,
+    seedIds: string[],
+    limit: number = 10,
+    scoreThreshold: number = 0.8
+  ): Promise<{ seedId: string; similar: SearchResult[] }[]> {
+    const clusters: { seedId: string; similar: SearchResult[] }[] = [];
+
+    for (const seedId of seedIds) {
+      try {
+        // Use recommend API to find similar vectors
+        const results = await this.client.recommend(collection, {
+          positive: [seedId],
+          limit,
+          with_payload: true,
+          score_threshold: scoreThreshold,
+        });
+
+        clusters.push({
+          seedId,
+          similar: results.map(r => ({
+            id: r.id as string,
+            score: r.score,
+            payload: r.payload as Record<string, unknown>,
+          })),
+        });
+      } catch (error: any) {
+        logger.warn(`Failed to find cluster for ${seedId}`, { error: error.message });
+      }
+    }
+
+    return clusters;
+  }
+
+  /**
+   * Find potential duplicates in a collection
+   */
+  async findDuplicates(
+    collection: string,
+    limit: number = 100,
+    threshold: number = 0.95
+  ): Promise<{ group: SearchResult[]; similarity: number }[]> {
+    const duplicates: { group: SearchResult[]; similarity: number }[] = [];
+    const processed = new Set<string>();
+
+    try {
+      // Sample vectors to check for duplicates
+      let offset: string | number | undefined = undefined;
+      let checked = 0;
+
+      do {
+        const response = await this.client.scroll(collection, {
+          limit: 100,
+          offset,
+          with_payload: true,
+          with_vector: true,
+        });
+
+        for (const point of response.points) {
+          if (processed.has(point.id as string)) continue;
+          if (checked >= limit) break;
+
+          const vector = point.vector as number[];
+          if (!vector) continue;
+
+          // Find similar vectors
+          const similar = await this.search(collection, vector, 5, undefined, threshold);
+
+          // Filter out self and already processed
+          const dupes = similar.filter(s =>
+            s.id !== point.id && !processed.has(s.id)
+          );
+
+          if (dupes.length > 0) {
+            const group = [
+              { id: point.id as string, score: 1, payload: point.payload as Record<string, unknown> },
+              ...dupes,
+            ];
+            duplicates.push({
+              group,
+              similarity: dupes[0].score,
+            });
+
+            // Mark all as processed
+            group.forEach(g => processed.add(g.id));
+          }
+
+          processed.add(point.id as string);
+          checked++;
+        }
+
+        offset = response.next_page_offset as string | number | undefined;
+      } while (offset && checked < limit);
+
+      return duplicates;
+    } catch (error: any) {
+      if (error.status === 404) {
+        return [];
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Get recommend (similar) vectors based on positive/negative examples
+   */
+  async recommend(
+    collection: string,
+    positiveIds: string[],
+    negativeIds: string[] = [],
+    limit: number = 10,
+    filter?: Record<string, unknown>
+  ): Promise<SearchResult[]> {
+    try {
+      const results = await this.client.recommend(collection, {
+        positive: positiveIds,
+        negative: negativeIds,
+        limit,
+        with_payload: true,
+        filter: filter as any,
+      });
+
+      return results.map(r => ({
+        id: r.id as string,
+        score: r.score,
+        payload: r.payload as Record<string, unknown>,
+      }));
+    } catch (error: any) {
+      if (error.status === 404) {
+        return [];
+      }
+      throw error;
+    }
+  }
 }
 
 export const vectorStore = new VectorStoreService();
