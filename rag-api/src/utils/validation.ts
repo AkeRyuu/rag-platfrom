@@ -130,13 +130,107 @@ export const updateTodoSchema = z.object({
 });
 
 // ============================================
+// Additional Schemas
+// ============================================
+
+export const searchGroupedSchema = z.object({
+  collection: collectionNameSchema,
+  query: z.string().min(1).max(10000),
+  groupBy: z.string().default('file'),
+  limit: z.number().int().min(1).max(100).default(10),
+  groupSize: z.number().int().min(1).max(10).default(1),
+  filters: z.object({
+    language: z.string().optional(),
+    path: z.string().optional(),
+  }).optional(),
+  scoreThreshold: z.number().min(0).max(1).optional(),
+});
+
+export const searchHybridSchema = z.object({
+  collection: collectionNameSchema,
+  query: z.string().min(1).max(10000),
+  limit: z.number().int().min(1).max(100).default(10),
+  semanticWeight: z.number().min(0).max(1).default(0.7),
+  filters: z.object({
+    language: z.string().optional(),
+    path: z.string().optional(),
+  }).optional(),
+});
+
+export const reviewSchema = z.object({
+  projectName: projectNameSchema.optional(),
+  code: z.string().max(100000).optional(),
+  diff: z.string().max(100000).optional(),
+  filePath: z.string().optional(),
+  reviewType: z.string().default('general'),
+});
+
+export const securityReviewSchema = z.object({
+  code: z.string().min(1).max(100000),
+  filePath: z.string().optional(),
+  language: z.string().optional(),
+});
+
+export const generateTestsSchema = z.object({
+  projectName: projectNameSchema.optional(),
+  code: z.string().min(1).max(100000),
+  filePath: z.string().optional(),
+  framework: z.string().default('jest'),
+  testType: z.string().default('unit'),
+  coverage: z.string().default('comprehensive'),
+});
+
+export const analyzeConversationSchema = z.object({
+  projectName: projectNameSchema.optional(),
+  conversation: z.string().min(1).max(100000),
+  context: z.string().optional(),
+  autoSave: z.boolean().default(false),
+  minConfidence: z.number().min(0).max(1).default(0.6),
+});
+
+export const trackUsageSchema = z.object({
+  projectName: projectNameSchema.optional(),
+  sessionId: z.string().optional(),
+  toolName: z.string().min(1),
+  inputSummary: z.string().default(''),
+  startTime: z.number().optional(),
+  resultCount: z.number().optional(),
+  success: z.boolean().default(true),
+  errorMessage: z.string().optional(),
+  metadata: z.record(z.unknown()).optional(),
+});
+
+export const searchFeedbackSchema = z.object({
+  projectName: projectNameSchema.optional(),
+  queryId: z.string().min(1),
+  query: z.string().min(1),
+  resultId: z.string().min(1),
+  resultFile: z.string().optional(),
+  feedbackType: z.string().min(1),
+  betterQuery: z.string().optional(),
+  comment: z.string().optional(),
+  sessionId: z.string().optional(),
+});
+
+export const memoryFeedbackSchema = z.object({
+  projectName: projectNameSchema.optional(),
+  memoryId: z.string().min(1),
+  memoryContent: z.string().min(1),
+  feedbackType: z.string().min(1),
+  correction: z.string().optional(),
+  comment: z.string().optional(),
+  sessionId: z.string().optional(),
+});
+
+// ============================================
 // Validation Middleware
 // ============================================
 
 export type ValidationTarget = 'body' | 'query' | 'params';
 
 /**
- * Create a validation middleware for a Zod schema
+ * Create a validation middleware for a Zod schema.
+ * Forwards ZodErrors to the global error handler.
  */
 export function validate<T extends z.ZodType>(
   schema: T,
@@ -161,15 +255,6 @@ export function validate<T extends z.ZodType>(
 
       next();
     } catch (error: unknown) {
-      if (error instanceof z.ZodError) {
-        return res.status(400).json({
-          error: 'Validation failed',
-          details: error.errors.map((e: z.ZodIssue) => ({
-            path: e.path.join('.'),
-            message: e.message,
-          })),
-        });
-      }
       next(error);
     }
   };

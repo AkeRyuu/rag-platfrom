@@ -12,6 +12,7 @@ import { logger, createRequestLogger } from './utils/logger';
 import { recordHttpRequest, getMetrics, getMetricsContentType } from './utils/metrics';
 import { vectorStore } from './services/vector-store';
 import { cacheService } from './services/cache';
+import { errorHandler } from './middleware/error-handler';
 import searchRoutes from './routes/search';
 import indexRoutes from './routes/index';
 import memoryRoutes from './routes/memory';
@@ -104,11 +105,8 @@ app.use('/api/dev/codebase', (req, res, next) => {
   next();
 });
 
-// Error handling
-app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
-  logger.error('Unhandled error', { error: err.message, stack: err.stack });
-  res.status(500).json({ error: 'Internal server error' });
-});
+// Global error handler
+app.use(errorHandler);
 
 // 404 handler
 app.use((req: Request, res: Response) => {

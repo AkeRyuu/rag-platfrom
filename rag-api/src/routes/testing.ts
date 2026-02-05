@@ -6,7 +6,8 @@ import { Router, Request, Response } from 'express';
 import { vectorStore } from '../services/vector-store';
 import { embeddingService } from '../services/embedding';
 import { llm } from '../services/llm';
-import { logger } from '../utils/logger';
+import { asyncHandler } from '../middleware/async-handler';
+import { validate, validateProjectName, generateTestsSchema } from '../utils/validation';
 
 const router = Router();
 
@@ -14,158 +15,129 @@ const router = Router();
  * Generate tests for code
  * POST /api/generate-tests
  */
-router.post('/generate-tests', async (req: Request, res: Response) => {
-  try {
-    const projectName = req.headers['x-project-name'] as string || req.body.projectName;
-    const {
-      code,
-      filePath,
-      framework = 'jest',
-      testType = 'unit',
-      coverage = 'comprehensive',
-    } = req.body;
+router.post('/generate-tests', validateProjectName, validate(generateTestsSchema), asyncHandler(async (req: Request, res: Response) => {
+  const { projectName, code, filePath, framework, testType, coverage } = req.body;
 
-    if (!code) {
-      return res.status(400).json({ error: 'code is required' });
-    }
+  const collectionName = `${projectName}_codebase`;
 
-    const collectionName = projectName ? `${projectName}_codebase` : null;
+  // 1. Find existing test patterns in codebase
+  let existingTests: Array<{ payload: Record<string, unknown>; score: number; id: string }> = [];
+  const testQuery = `test spec ${framework} ${filePath || ''}`;
+  const testEmbedding = await embeddingService.embed(testQuery);
+  existingTests = await vectorStore.search(
+    collectionName,
+    testEmbedding,
+    5,
+    { must: [{ key: 'file', match: { text: '.test.' } }] }
+  );
 
-    // 1. Find existing test patterns in codebase
-    let existingTests: any[] = [];
-    if (collectionName) {
-      const testQuery = `test spec ${framework} ${filePath || ''}`;
-      const testEmbedding = await embeddingService.embed(testQuery);
-      existingTests = await vectorStore.search(
-        collectionName,
-        testEmbedding,
-        5,
-        { must: [{ key: 'file', match: { text: '.test.' } }] }
-      );
-    }
+  // 2. Analyze code structure
+  const codeAnalysis = analyzeCodeStructure(code);
 
-    // 2. Analyze code structure
-    const codeAnalysis = analyzeCodeStructure(code);
+  // 3. Build test generation prompt
+  const existingTestContext = existingTests.length > 0
+    ? `\n\nExisting test patterns in this project:\n${existingTests.map(t => `\`\`\`\n${(t.payload.content as string).slice(0, 500)}\n\`\`\``).join('\n')}`
+    : '';
 
-    // 3. Build test generation prompt
-    const existingTestContext = existingTests.length > 0
-      ? `\n\nExisting test patterns in this project:\n${existingTests.map(t => `\`\`\`\n${(t.payload.content as string).slice(0, 500)}\n\`\`\``).join('\n')}`
-      : '';
+  const prompt = buildTestPrompt(code, filePath, framework, testType, coverage, codeAnalysis, existingTestContext);
 
-    const prompt = buildTestPrompt(code, filePath, framework, testType, coverage, codeAnalysis, existingTestContext);
+  // 4. Generate tests
+  const result = await llm.complete(prompt, {
+    systemPrompt: getTestSystemPrompt(framework),
+    maxTokens: 4000,
+    temperature: 0.3,
+  });
 
-    // 4. Generate tests
-    const result = await llm.complete(prompt, {
-      systemPrompt: getTestSystemPrompt(framework),
-      maxTokens: 4000,
-      temperature: 0.3,
-    });
+  const tests = extractTestCode(result.text);
 
-    // Extract test code
-    const tests = extractTestCode(result.text);
-
-    res.json({
-      tests,
-      framework,
-      testType,
-      analysis: codeAnalysis,
-      existingPatternsFound: existingTests.length,
-    });
-  } catch (error: any) {
-    logger.error('Test generation failed', { error: error.message });
-    res.status(500).json({ error: 'Failed to generate tests' });
-  }
-});
+  res.json({
+    tests,
+    framework,
+    testType,
+    analysis: codeAnalysis,
+    existingPatternsFound: existingTests.length,
+  });
+}));
 
 /**
  * Generate test cases without full implementation
  * POST /api/generate-test-cases
  */
-router.post('/generate-test-cases', async (req: Request, res: Response) => {
-  try {
-    const { code, filePath, requirements } = req.body;
+router.post('/generate-test-cases', asyncHandler(async (req: Request, res: Response) => {
+  const { code, requirements } = req.body;
 
-    if (!code && !requirements) {
-      return res.status(400).json({ error: 'code or requirements is required' });
-    }
-
-    const prompt = code
-      ? `Generate test cases for this code:\n\n\`\`\`\n${code}\n\`\`\``
-      : `Generate test cases for these requirements:\n\n${requirements}`;
-
-    const result = await llm.complete(prompt, {
-      systemPrompt: TEST_CASES_SYSTEM_PROMPT,
-      maxTokens: 2000,
-      temperature: 0.3,
-    });
-
-    let testCases;
-    try {
-      testCases = JSON.parse(result.text);
-    } catch {
-      testCases = {
-        testCases: [],
-        summary: result.text,
-      };
-    }
-
-    res.json(testCases);
-  } catch (error: any) {
-    logger.error('Test case generation failed', { error: error.message });
-    res.status(500).json({ error: 'Failed to generate test cases' });
+  if (!code && !requirements) {
+    return res.status(400).json({ error: 'code or requirements is required' });
   }
-});
+
+  const prompt = code
+    ? `Generate test cases for this code:\n\n\`\`\`\n${code}\n\`\`\``
+    : `Generate test cases for these requirements:\n\n${requirements}`;
+
+  const result = await llm.complete(prompt, {
+    systemPrompt: TEST_CASES_SYSTEM_PROMPT,
+    maxTokens: 2000,
+    temperature: 0.3,
+  });
+
+  let testCases;
+  try {
+    testCases = JSON.parse(result.text);
+  } catch {
+    testCases = {
+      testCases: [],
+      summary: result.text,
+    };
+  }
+
+  res.json(testCases);
+}));
 
 /**
  * Analyze existing tests
  * POST /api/analyze-tests
  */
-router.post('/analyze-tests', async (req: Request, res: Response) => {
-  try {
-    const { testCode, sourceCode } = req.body;
+router.post('/analyze-tests', asyncHandler(async (req: Request, res: Response) => {
+  const { testCode, sourceCode } = req.body;
 
-    if (!testCode) {
-      return res.status(400).json({ error: 'testCode is required' });
-    }
-
-    const sourceContext = sourceCode
-      ? `\n\nSource code being tested:\n\`\`\`\n${sourceCode}\n\`\`\``
-      : '';
-
-    const result = await llm.complete(
-      `Analyze these tests for coverage and quality:\n\n\`\`\`\n${testCode}\n\`\`\`${sourceContext}`,
-      {
-        systemPrompt: TEST_ANALYSIS_SYSTEM_PROMPT,
-        maxTokens: 2000,
-        temperature: 0.3,
-      }
-    );
-
-    let analysis;
-    try {
-      analysis = JSON.parse(result.text);
-    } catch {
-      analysis = {
-        quality: 'unknown',
-        coverage: {},
-        suggestions: [],
-        summary: result.text,
-      };
-    }
-
-    res.json({ analysis });
-  } catch (error: any) {
-    logger.error('Test analysis failed', { error: error.message });
-    res.status(500).json({ error: 'Failed to analyze tests' });
+  if (!testCode) {
+    return res.status(400).json({ error: 'testCode is required' });
   }
-});
+
+  const sourceContext = sourceCode
+    ? `\n\nSource code being tested:\n\`\`\`\n${sourceCode}\n\`\`\``
+    : '';
+
+  const result = await llm.complete(
+    `Analyze these tests for coverage and quality:\n\n\`\`\`\n${testCode}\n\`\`\`${sourceContext}`,
+    {
+      systemPrompt: TEST_ANALYSIS_SYSTEM_PROMPT,
+      maxTokens: 2000,
+      temperature: 0.3,
+    }
+  );
+
+  let analysis;
+  try {
+    analysis = JSON.parse(result.text);
+  } catch {
+    analysis = {
+      quality: 'unknown',
+      coverage: {},
+      suggestions: [],
+      summary: result.text,
+    };
+  }
+
+  res.json({ analysis });
+}));
 
 // ============================================
 // System Prompts
 // ============================================
 
 function getTestSystemPrompt(framework: string): string {
-  const frameworkSpecifics = {
+  const frameworkSpecifics: Record<string, string> = {
     jest: 'Use Jest syntax with describe/it/expect. Include beforeEach/afterEach for setup/teardown.',
     vitest: 'Use Vitest syntax (similar to Jest). Use vi for mocking.',
     pytest: 'Use pytest with fixtures. Use pytest.mark for categorization.',
@@ -175,7 +147,7 @@ function getTestSystemPrompt(framework: string): string {
   return `You are a test engineering expert. Generate comprehensive tests.
 
 Framework: ${framework}
-${frameworkSpecifics[framework as keyof typeof frameworkSpecifics] || ''}
+${frameworkSpecifics[framework] || ''}
 
 Requirements:
 - Write clear, maintainable tests
@@ -247,7 +219,6 @@ interface CodeAnalysis {
 }
 
 function analyzeCodeStructure(code: string): CodeAnalysis {
-  // Simple static analysis
   const functionMatches = code.match(/(?:function|const|let|var)\s+(\w+)\s*(?:=\s*(?:async\s*)?\(|[(<])/g) || [];
   const classMatches = code.match(/class\s+(\w+)/g) || [];
   const exportMatches = code.match(/export\s+(?:default\s+)?(?:function|const|class|let|var|async)?\s*(\w+)/g) || [];
@@ -298,13 +269,10 @@ Generate complete, runnable test code.`;
 }
 
 function extractTestCode(response: string): string {
-  // Extract code blocks from response
   const codeBlockMatch = response.match(/```(?:typescript|javascript|python|ts|js|py)?\n([\s\S]*?)```/);
   if (codeBlockMatch) {
     return codeBlockMatch[1].trim();
   }
-
-  // If no code block, return entire response (might be just code)
   return response.trim();
 }
 
