@@ -28,7 +28,7 @@ class CacheService {
     try {
       this.client = new Redis(config.REDIS_URL, {
         maxRetriesPerRequest: 3,
-        retryStrategy: (times) => {
+        retryStrategy: (times: number): number | null => {
           if (times > 3) {
             logger.warn('Redis connection failed, cache disabled');
             return null;

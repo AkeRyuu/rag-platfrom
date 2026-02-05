@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "rag": {
+      "command": "node",
+      "args": ["/home/ake/shared-ai-infra/mcp-server/dist/index.js"],
+      "env": {
+        "PROJECT_NAME": "shared-ai-infra",
+        "PROJECT_PATH": "/home/ake/shared-ai-infra",
+        "RAG_API_URL": "http://localhost:3100"
+      }
+    }
+  }
+}

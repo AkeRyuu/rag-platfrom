@@ -16,7 +16,7 @@ const router = Router();
  */
 router.post('/search', async (req: Request, res: Response) => {
   try {
-    const { collection, query, limit = 5, filters } = req.body;
+    const { collection, query, limit = 5, filters, scoreThreshold } = req.body;
 
     if (!collection || !query) {
       return res.status(400).json({ error: 'collection and query are required' });
@@ -49,8 +49,8 @@ router.post('/search', async (req: Request, res: Response) => {
       }
     }
 
-    // Search
-    const results = await vectorStore.search(collection, queryEmbedding, limit, filter);
+    // Search with optional score threshold
+    const results = await vectorStore.search(collection, queryEmbedding, limit, filter, scoreThreshold);
 
     res.json({
       results: results.map(r => ({
@@ -74,14 +74,14 @@ router.post('/search', async (req: Request, res: Response) => {
  */
 router.post('/search-similar', async (req: Request, res: Response) => {
   try {
-    const { collection, code, limit = 5 } = req.body;
+    const { collection, code, limit = 5, scoreThreshold = 0.7 } = req.body;
 
     if (!collection || !code) {
       return res.status(400).json({ error: 'collection and code are required' });
     }
 
     const codeEmbedding = await embeddingService.embed(code);
-    const results = await vectorStore.search(collection, codeEmbedding, limit);
+    const results = await vectorStore.search(collection, codeEmbedding, limit, undefined, scoreThreshold);
 
     res.json({
       results: results.map(r => ({

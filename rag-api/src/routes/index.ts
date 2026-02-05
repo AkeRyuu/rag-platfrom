@@ -171,6 +171,68 @@ router.post('/collections/:name/clear', async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * Create/ensure payload indexes on a collection (migration)
+ * POST /api/collections/:name/indexes
+ */
+router.post('/collections/:name/indexes', async (req: Request, res: Response) => {
+  try {
+    const { name } = req.params;
+
+    await vectorStore.ensurePayloadIndexes(name);
+    const info = await vectorStore.getCollectionInfo(name);
+
+    res.json({
+      message: `Created indexes on collection: ${name}`,
+      indexedFields: info.indexedFields,
+    });
+  } catch (error: any) {
+    logger.error('Failed to create indexes', { error: error.message });
+    res.status(500).json({ error: 'Failed to create indexes' });
+  }
+});
+
+/**
+ * Create indexes on all existing collections (migration)
+ * POST /api/collections/migrate-indexes
+ */
+router.post('/collections/migrate-indexes', async (req: Request, res: Response) => {
+  try {
+    const collections = await vectorStore.listCollections();
+    const results: Record<string, string[]> = {};
+
+    for (const name of collections) {
+      await vectorStore.ensurePayloadIndexes(name);
+      const info = await vectorStore.getCollectionInfo(name);
+      results[name] = info.indexedFields || [];
+    }
+
+    res.json({
+      message: `Migrated ${collections.length} collections`,
+      collections: results,
+    });
+  } catch (error: any) {
+    logger.error('Failed to migrate indexes', { error: error.message });
+    res.status(500).json({ error: 'Failed to migrate indexes' });
+  }
+});
+
+/**
+ * Get detailed collection info with indexes
+ * GET /api/collections/:name/info
+ */
+router.get('/collections/:name/info', async (req: Request, res: Response) => {
+  try {
+    const { name } = req.params;
+    const info = await vectorStore.getCollectionInfo(name);
+
+    res.json(info);
+  } catch (error: any) {
+    logger.error('Failed to get collection info', { error: error.message });
+    res.status(500).json({ error: 'Failed to get collection info' });
+  }
+});
+
 // ============================================
 // Confluence Routes
 // ============================================

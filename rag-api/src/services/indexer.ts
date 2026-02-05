@@ -313,13 +313,26 @@ export async function indexProject(options: IndexOptions): Promise<IndexStats> {
     indexProgress.get(projectName)!.totalFiles = filesToIndex.length;
     logger.info(`Found ${filesToIndex.length} files to index (${allFiles.length - filesToIndex.length} unchanged)`);
 
-    // Process files in batches
-    const batchSize = 10;
-    for (let i = 0; i < filesToIndex.length; i += batchSize) {
-      const batch = filesToIndex.slice(i, i + batchSize);
-      const points: VectorPoint[] = [];
+    // Process files in batches with batch embedding
+    const fileBatchSize = 20; // Files per batch
+    const embeddingBatchSize = 100; // Chunks per embedding batch
 
-      for (const filePath of batch) {
+    for (let i = 0; i < filesToIndex.length; i += fileBatchSize) {
+      const fileBatch = filesToIndex.slice(i, i + fileBatchSize);
+
+      // Collect all chunks and metadata first
+      interface ChunkInfo {
+        text: string;
+        relativePath: string;
+        language: string;
+        chunkIndex: number;
+        totalChunks: number;
+        hash: string;
+      }
+      const allChunks: ChunkInfo[] = [];
+      const processedFiles: string[] = [];
+
+      for (const filePath of fileBatch) {
         try {
           const content = fs.readFileSync(filePath, 'utf-8');
           const relativePath = path.relative(projectPath, filePath);
@@ -335,55 +348,103 @@ export async function indexProject(options: IndexOptions): Promise<IndexStats> {
 
           // Chunk the content
           const chunks = chunkCode(content);
+          const validChunks = chunks.filter(c => c.trim().length >= 10);
 
-          for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex++) {
-            const chunk = chunks[chunkIndex];
-            if (chunk.trim().length < 10) continue;
-
-            // Get embedding
-            const embedding = await embeddingService.embed(chunk);
-
-            points.push({
-              vector: embedding,
-              payload: {
-                file: relativePath,
-                content: chunk,
-                language,
-                chunkIndex,
-                totalChunks: chunks.length,
-                project: projectName,
-                indexedAt: new Date().toISOString(),
-                fileHash: hash,
-              },
+          for (let chunkIndex = 0; chunkIndex < validChunks.length; chunkIndex++) {
+            allChunks.push({
+              text: validChunks[chunkIndex],
+              relativePath,
+              language,
+              chunkIndex,
+              totalChunks: validChunks.length,
+              hash,
             });
-
-            stats.totalChunks++;
           }
 
           // Update hash index
           newIndex[relativePath] = {
             hash,
             indexedAt: new Date().toISOString(),
-            chunkCount: chunks.length,
+            chunkCount: validChunks.length,
           };
 
+          processedFiles.push(relativePath);
           stats.indexedFiles++;
         } catch (error) {
-          logger.warn(`Failed to index file: ${filePath}`, { error });
+          logger.warn(`Failed to read file: ${filePath}`, { error });
           stats.errors++;
         }
       }
 
-      // Upsert batch
-      if (points.length > 0) {
-        await vectorStore.upsert(collectionName, points);
+      // Batch embed all chunks for this file batch
+      if (allChunks.length > 0) {
+        const points: VectorPoint[] = [];
+
+        // Process embeddings in batches
+        for (let j = 0; j < allChunks.length; j += embeddingBatchSize) {
+          const chunkBatch = allChunks.slice(j, j + embeddingBatchSize);
+          const texts = chunkBatch.map(c => c.text);
+
+          try {
+            // Use batch embedding for efficiency
+            const embeddings = await embeddingService.embedBatch(texts);
+
+            for (let k = 0; k < chunkBatch.length; k++) {
+              const chunk = chunkBatch[k];
+              points.push({
+                vector: embeddings[k],
+                payload: {
+                  file: chunk.relativePath,
+                  content: chunk.text,
+                  language: chunk.language,
+                  chunkIndex: chunk.chunkIndex,
+                  totalChunks: chunk.totalChunks,
+                  project: projectName,
+                  indexedAt: new Date().toISOString(),
+                  fileHash: chunk.hash,
+                },
+              });
+              stats.totalChunks++;
+            }
+          } catch (error) {
+            logger.error(`Batch embedding failed, falling back to sequential`, { error });
+            // Fallback to sequential embedding
+            for (const chunk of chunkBatch) {
+              try {
+                const embedding = await embeddingService.embed(chunk.text);
+                points.push({
+                  vector: embedding,
+                  payload: {
+                    file: chunk.relativePath,
+                    content: chunk.text,
+                    language: chunk.language,
+                    chunkIndex: chunk.chunkIndex,
+                    totalChunks: chunk.totalChunks,
+                    project: projectName,
+                    indexedAt: new Date().toISOString(),
+                    fileHash: chunk.hash,
+                  },
+                });
+                stats.totalChunks++;
+              } catch (embError) {
+                logger.warn(`Failed to embed chunk`, { error: embError });
+                stats.errors++;
+              }
+            }
+          }
+        }
+
+        // Upsert batch
+        if (points.length > 0) {
+          await vectorStore.upsert(collectionName, points);
+        }
       }
 
       // Update progress
       const progress = indexProgress.get(projectName)!;
-      progress.processedFiles = Math.min(i + batchSize, filesToIndex.length);
+      progress.processedFiles = Math.min(i + fileBatchSize, filesToIndex.length);
 
-      logger.debug(`Progress: ${progress.processedFiles}/${filesToIndex.length}`);
+      logger.debug(`Progress: ${progress.processedFiles}/${filesToIndex.length} files, ${stats.totalChunks} chunks`);
     }
 
     // Save updated hash index
