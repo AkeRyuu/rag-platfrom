@@ -1,10 +1,11 @@
 /**
- * Embedding Service - Multi-provider support
+ * Embedding Service - Multi-provider support with caching
  */
 
 import axios from 'axios';
 import config from '../config';
 import { logger } from '../utils/logger';
+import { cacheService } from './cache';
 
 export interface EmbeddingResult {
   embedding: number[];
@@ -19,16 +20,31 @@ class EmbeddingService {
   }
 
   async embed(text: string): Promise<number[]> {
+    // Try cache first
+    const cached = await cacheService.getEmbedding(text);
+    if (cached) {
+      return cached;
+    }
+
+    // Compute embedding
+    let embedding: number[];
     switch (this.provider) {
       case 'bge-m3-server':
-        return this.embedWithBGE(text);
+        embedding = await this.embedWithBGE(text);
+        break;
       case 'ollama':
-        return this.embedWithOllama(text);
+        embedding = await this.embedWithOllama(text);
+        break;
       case 'openai':
-        return this.embedWithOpenAI(text);
+        embedding = await this.embedWithOpenAI(text);
+        break;
       default:
         throw new Error(`Unknown embedding provider: ${this.provider}`);
     }
+
+    // Cache the result
+    await cacheService.setEmbedding(text, embedding);
+    return embedding;
   }
 
   async embedBatch(texts: string[]): Promise<number[][]> {

@@ -211,6 +211,105 @@ class VectorStoreService {
   }
 
   /**
+   * Aggregate counts by a specific payload field
+   */
+  async aggregateByField(collection: string, field: string): Promise<Record<string, number>> {
+    const counts: Record<string, number> = {};
+
+    try {
+      let offset: string | number | undefined = undefined;
+
+      do {
+        const response = await this.client.scroll(collection, {
+          limit: 1000,
+          offset,
+          with_payload: true,
+          with_vector: false,
+        });
+
+        for (const point of response.points) {
+          const payload = point.payload as Record<string, unknown>;
+          const value = payload[field];
+          if (value && typeof value === 'string') {
+            counts[value] = (counts[value] || 0) + 1;
+          }
+        }
+
+        offset = response.next_page_offset as string | number | undefined;
+      } while (offset);
+
+      return counts;
+    } catch (error: any) {
+      if (error.status === 404) {
+        return {};
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Scroll through all vectors in a collection to aggregate stats
+   */
+  async aggregateStats(collection: string): Promise<{
+    totalFiles: number;
+    languages: Record<string, number>;
+    lastIndexed?: string;
+  }> {
+    const files = new Set<string>();
+    const languages: Record<string, number> = {};
+    let lastIndexed: string | undefined;
+
+    try {
+      let offset: string | number | undefined = undefined;
+
+      do {
+        const response = await this.client.scroll(collection, {
+          limit: 1000,
+          offset,
+          with_payload: true,
+          with_vector: false,
+        });
+
+        for (const point of response.points) {
+          const payload = point.payload as Record<string, unknown>;
+
+          // Track unique files
+          if (payload.file) {
+            files.add(payload.file as string);
+          }
+
+          // Count languages
+          if (payload.language) {
+            const lang = payload.language as string;
+            languages[lang] = (languages[lang] || 0) + 1;
+          }
+
+          // Track latest indexedAt
+          if (payload.indexedAt) {
+            const indexedAt = payload.indexedAt as string;
+            if (!lastIndexed || indexedAt > lastIndexed) {
+              lastIndexed = indexedAt;
+            }
+          }
+        }
+
+        offset = response.next_page_offset as string | number | undefined;
+      } while (offset);
+
+      return {
+        totalFiles: files.size,
+        languages,
+        lastIndexed,
+      };
+    } catch (error: any) {
+      if (error.status === 404) {
+        return { totalFiles: 0, languages: {}, lastIndexed: undefined };
+      }
+      throw error;
+    }
+  }
+
+  /**
    * Clear all vectors in a collection (but keep the collection)
    */
   async clearCollection(collection: string): Promise<void> {

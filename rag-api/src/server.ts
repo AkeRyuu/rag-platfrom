@@ -6,11 +6,27 @@
 
 import express, { Express, Request, Response, NextFunction } from 'express';
 import cors from 'cors';
+import { v4 as uuidv4 } from 'uuid';
 import config from './config';
-import { logger } from './utils/logger';
+import { logger, createRequestLogger } from './utils/logger';
+import { recordHttpRequest, getMetrics, getMetricsContentType } from './utils/metrics';
 import { vectorStore } from './services/vector-store';
+import { cacheService } from './services/cache';
 import searchRoutes from './routes/search';
 import indexRoutes from './routes/index';
+import memoryRoutes from './routes/memory';
+import reviewRoutes from './routes/review';
+import testingRoutes from './routes/testing';
+
+// Extend Express Request type
+declare global {
+  namespace Express {
+    interface Request {
+      requestId: string;
+      requestLogger: ReturnType<typeof createRequestLogger>;
+    }
+  }
+}
 
 const app: Express = express();
 
@@ -18,19 +34,32 @@ const app: Express = express();
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 
-// Request logging
+// Request ID and logging middleware
 app.use((req: Request, res: Response, next: NextFunction) => {
   const start = Date.now();
+  const requestId = (req.headers['x-request-id'] as string) || uuidv4();
+  const projectName = req.headers['x-project-name'] as string || 'unknown';
+
+  // Attach request context
+  req.requestId = requestId;
+  req.requestLogger = createRequestLogger(requestId, projectName);
+
+  // Set response header
+  res.setHeader('X-Request-ID', requestId);
+
+  // Log and record metrics on finish
   res.on('finish', () => {
     const duration = Date.now() - start;
-    const projectName = req.headers['x-project-name'] || 'unknown';
-    logger.info(`[${projectName}] ${req.method} ${req.path} ${res.statusCode} ${duration}ms`);
+    req.requestLogger.info(`${req.method} ${req.path} ${res.statusCode} ${duration}ms`);
+    recordHttpRequest(req.method, req.path, res.statusCode, duration, projectName);
   });
+
   next();
 });
 
 // Health check
-app.get('/health', (req: Request, res: Response) => {
+app.get('/health', async (req: Request, res: Response) => {
+  const cacheStats = await cacheService.getStats();
   res.json({
     status: 'ok',
     timestamp: new Date().toISOString(),
@@ -39,12 +68,22 @@ app.get('/health', (req: Request, res: Response) => {
       llmProvider: config.LLM_PROVIDER,
       vectorSize: config.VECTOR_SIZE,
     },
+    cache: cacheStats,
   });
+});
+
+// Prometheus metrics endpoint
+app.get('/metrics', async (req: Request, res: Response) => {
+  res.set('Content-Type', getMetricsContentType());
+  res.end(await getMetrics());
 });
 
 // API routes
 app.use('/api', searchRoutes);
 app.use('/api', indexRoutes);
+app.use('/api', memoryRoutes);
+app.use('/api', reviewRoutes);
+app.use('/api', testingRoutes);
 
 // Legacy routes for backward compatibility with cypro-rag MCP
 app.use('/api/dev/codebase', (req, res, next) => {
@@ -77,6 +116,10 @@ app.use((req: Request, res: Response) => {
 // Start server
 export async function startServer(): Promise<void> {
   try {
+    // Initialize cache
+    logger.info('Initializing cache...');
+    await cacheService.initialize();
+
     // Initialize vector store
     logger.info('Initializing vector store...');
     await vectorStore.initialize();
@@ -85,6 +128,7 @@ export async function startServer(): Promise<void> {
     app.listen(config.API_PORT, config.API_HOST, () => {
       logger.info(`Shared RAG API running at http://${config.API_HOST}:${config.API_PORT}`);
       logger.info(`Embedding: ${config.EMBEDDING_PROVIDER}, LLM: ${config.LLM_PROVIDER}`);
+      logger.info(`Cache: ${cacheService.isEnabled() ? 'enabled' : 'disabled'}`);
     });
   } catch (error) {
     logger.error('Failed to start server', { error });

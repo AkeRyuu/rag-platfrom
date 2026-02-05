@@ -2,6 +2,9 @@
  * Shared RAG API Configuration
  */
 
+import dotenv from 'dotenv';
+dotenv.config();
+
 export interface Config {
   // Server
   API_PORT: number;

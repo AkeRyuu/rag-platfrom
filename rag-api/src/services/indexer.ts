@@ -4,8 +4,10 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import * as crypto from 'crypto';
 import { vectorStore, VectorPoint } from './vector-store';
 import { embeddingService } from './embedding';
+import { cacheService } from './cache';
 import { logger } from '../utils/logger';
 
 export interface IndexOptions {
@@ -14,6 +16,7 @@ export interface IndexOptions {
   patterns?: string[];
   excludePatterns?: string[];
   force?: boolean;
+  incremental?: boolean; // Only index changed files
 }
 
 export interface IndexStats {
@@ -63,6 +66,40 @@ const DEFAULT_EXCLUDE = [
   '**/__pycache__/**',
   '**/target/**',
 ];
+
+// File hash index for incremental indexing
+interface FileHashIndex {
+  [filePath: string]: {
+    hash: string;
+    indexedAt: string;
+    chunkCount: number;
+  };
+}
+
+/**
+ * Compute MD5 hash of file content
+ */
+function computeFileHash(content: string): string {
+  return crypto.createHash('md5').update(content).digest('hex');
+}
+
+/**
+ * Get file hash index from cache
+ */
+async function getFileHashIndex(projectName: string): Promise<FileHashIndex> {
+  const key = `file_index:${projectName}`;
+  const cached = await cacheService.get<FileHashIndex>(key);
+  return cached || {};
+}
+
+/**
+ * Save file hash index to cache
+ */
+async function saveFileHashIndex(projectName: string, index: FileHashIndex): Promise<void> {
+  const key = `file_index:${projectName}`;
+  // Store indefinitely (until force reindex)
+  await cacheService.set(key, index);
+}
 
 /**
  * Get collection name for a project
@@ -183,7 +220,14 @@ function walkDirectory(
  * Index a project's codebase
  */
 export async function indexProject(options: IndexOptions): Promise<IndexStats> {
-  const { projectName, projectPath, patterns = DEFAULT_PATTERNS, excludePatterns = DEFAULT_EXCLUDE, force = false } = options;
+  const {
+    projectName,
+    projectPath,
+    patterns = DEFAULT_PATTERNS,
+    excludePatterns = DEFAULT_EXCLUDE,
+    force = false,
+    incremental = true, // Enable incremental by default
+  } = options;
 
   const collectionName = getCollectionName(projectName, 'codebase');
   const startTime = Date.now();
@@ -196,7 +240,10 @@ export async function indexProject(options: IndexOptions): Promise<IndexStats> {
     startedAt: new Date(),
   });
 
-  logger.info(`Starting indexing for project: ${projectName}`, { path: projectPath });
+  logger.info(`Starting indexing for project: ${projectName}`, {
+    path: projectPath,
+    incremental: incremental && !force,
+  });
 
   const stats: IndexStats = {
     totalFiles: 0,
@@ -210,20 +257,66 @@ export async function indexProject(options: IndexOptions): Promise<IndexStats> {
     // Clear existing collection if force
     if (force) {
       await vectorStore.clearCollection(collectionName);
+      await saveFileHashIndex(projectName, {}); // Clear hash index
       logger.info(`Cleared existing collection: ${collectionName}`);
     }
 
     // Find all files
-    const files = walkDirectory(projectPath, patterns, excludePatterns, projectPath);
-    stats.totalFiles = files.length;
+    const allFiles = walkDirectory(projectPath, patterns, excludePatterns, projectPath);
+    stats.totalFiles = allFiles.length;
 
-    indexProgress.get(projectName)!.totalFiles = files.length;
-    logger.info(`Found ${files.length} files to index`);
+    // Get existing file hash index for incremental indexing
+    const existingIndex = incremental && !force ? await getFileHashIndex(projectName) : {};
+    const newIndex: FileHashIndex = {};
+
+    // Determine which files need indexing
+    const filesToIndex: string[] = [];
+    const filesToRemove: string[] = [];
+
+    for (const filePath of allFiles) {
+      const relativePath = path.relative(projectPath, filePath);
+      try {
+        const content = fs.readFileSync(filePath, 'utf-8');
+        const hash = computeFileHash(content);
+
+        // Check if file changed
+        const existing = existingIndex[relativePath];
+        if (!existing || existing.hash !== hash) {
+          filesToIndex.push(filePath);
+        }
+
+        // Track in new index (will be updated after indexing)
+        newIndex[relativePath] = existing || { hash, indexedAt: '', chunkCount: 0 };
+      } catch (error) {
+        logger.warn(`Failed to read file: ${filePath}`, { error });
+        stats.errors++;
+      }
+    }
+
+    // Find removed files
+    for (const existingPath of Object.keys(existingIndex)) {
+      if (!newIndex[existingPath]) {
+        filesToRemove.push(existingPath);
+      }
+    }
+
+    // Remove vectors for deleted files
+    if (filesToRemove.length > 0) {
+      logger.info(`Removing ${filesToRemove.length} deleted files from index`);
+      for (const removedFile of filesToRemove) {
+        await vectorStore.deleteByFilter(collectionName, {
+          must: [{ key: 'file', match: { value: removedFile } }],
+        });
+      }
+    }
+
+    indexProgress.get(projectName)!.totalFiles = filesToIndex.length;
+    logger.info(`Found ${filesToIndex.length} files to index (${allFiles.length - filesToIndex.length} unchanged)`);
 
     // Process files in batches
     const batchSize = 10;
-    for (let i = 0; i < files.length; i += batchSize) {
-      const batch = files.slice(i, i + batchSize);
+    for (let i = 0; i < filesToIndex.length; i += batchSize) {
+      const batch = filesToIndex.slice(i, i + batchSize);
       const points: VectorPoint[] = [];
 
       for (const filePath of batch) {
@@ -231,6 +324,14 @@ export async function indexProject(options: IndexOptions): Promise<IndexStats> {
           const content = fs.readFileSync(filePath, 'utf-8');
           const relativePath = path.relative(projectPath, filePath);
           const language = getLanguage(filePath);
+          const hash = computeFileHash(content);
+
+          // Delete existing chunks for this file (if incremental update)
+          if (incremental && existingIndex[relativePath]) {
+            await vectorStore.deleteByFilter(collectionName, {
+              must: [{ key: 'file', match: { value: relativePath } }],
+            });
+          }
 
           // Chunk the content
           const chunks = chunkCode(content);
@@ -252,11 +353,19 @@ export async function indexProject(options: IndexOptions): Promise<IndexStats> {
                 totalChunks: chunks.length,
                 project: projectName,
                 indexedAt: new Date().toISOString(),
+                fileHash: hash,
               },
             });
 
             stats.totalChunks++;
           }
+
+          // Update hash index
+          newIndex[relativePath] = {
+            hash,
+            indexedAt: new Date().toISOString(),
+            chunkCount: chunks.length,
+          };
 
           stats.indexedFiles++;
         } catch (error) {
@@ -272,10 +381,13 @@ export async function indexProject(options: IndexOptions): Promise<IndexStats> {
 
       // Update progress
       const progress = indexProgress.get(projectName)!;
-      progress.processedFiles = Math.min(i + batchSize, files.length);
+      progress.processedFiles = Math.min(i + batchSize, filesToIndex.length);
 
-      logger.debug(`Progress: ${progress.processedFiles}/${files.length}`);
+      logger.debug(`Progress: ${progress.processedFiles}/${filesToIndex.length}`);
     }
+
+    // Save updated hash index
+    await saveFileHashIndex(projectName, newIndex);
 
     stats.duration = Date.now() - startTime;
 
@@ -283,6 +395,9 @@ export async function indexProject(options: IndexOptions): Promise<IndexStats> {
     const progress = indexProgress.get(projectName)!;
     progress.status = 'completed';
     progress.completedAt = new Date();
+
+    // Invalidate search cache for this collection
+    await cacheService.invalidateCollection(collectionName);
 
     logger.info(`Indexing completed for ${projectName}`, { ...stats });
     return stats;
@@ -319,10 +434,13 @@ export async function getProjectStats(projectName: string): Promise<{
   const collectionName = getCollectionName(projectName, 'codebase');
   const info = await vectorStore.getCollectionInfo(collectionName);
 
+  // Aggregate real stats from collection payloads
+  const aggregated = await vectorStore.aggregateStats(collectionName);
+
   return {
-    totalFiles: 0, // Would need to aggregate from payloads
+    totalFiles: aggregated.totalFiles,
     vectorCount: info.vectorsCount,
-    lastIndexed: undefined, // Would need to get from metadata
-    languages: {},
+    lastIndexed: aggregated.lastIndexed,
+    languages: aggregated.languages,
   };
 }
