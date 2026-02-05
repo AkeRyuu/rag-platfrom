@@ -98,6 +98,195 @@ router.post('/search-similar', async (req: Request, res: Response) => {
 });
 
 /**
+ * Search with grouping (one result per file/group)
+ * POST /api/search-grouped
+ */
+router.post('/search-grouped', async (req: Request, res: Response) => {
+  try {
+    const {
+      collection,
+      query,
+      groupBy = 'file',
+      limit = 10,
+      groupSize = 1,
+      filters,
+      scoreThreshold,
+    } = req.body;
+
+    if (!collection || !query) {
+      return res.status(400).json({ error: 'collection and query are required' });
+    }
+
+    const queryEmbedding = await embeddingService.embed(query);
+
+    // Build filter
+    let filter: Record<string, unknown> | undefined;
+    if (filters) {
+      const conditions: any[] = [];
+      if (filters.language) {
+        conditions.push({ key: 'language', match: { value: filters.language } });
+      }
+      if (filters.path) {
+        conditions.push({ key: 'file', match: { text: filters.path } });
+      }
+      if (conditions.length > 0) {
+        filter = { must: conditions };
+      }
+    }
+
+    const groups = await vectorStore.searchGroups(
+      collection,
+      queryEmbedding,
+      groupBy,
+      limit,
+      groupSize,
+      filter,
+      scoreThreshold
+    );
+
+    res.json({
+      groups: groups.map(g => ({
+        [groupBy]: g.group,
+        results: g.results.map(r => ({
+          file: r.payload.file,
+          content: r.payload.content,
+          language: r.payload.language,
+          score: r.score,
+        })),
+      })),
+      totalGroups: groups.length,
+    });
+  } catch (error: any) {
+    logger.error('Grouped search failed', { error: error.message });
+    res.status(500).json({ error: 'Grouped search failed' });
+  }
+});
+
+/**
+ * Hybrid search (keyword + semantic)
+ * POST /api/search-hybrid
+ */
+router.post('/search-hybrid', async (req: Request, res: Response) => {
+  try {
+    const {
+      collection,
+      query,
+      limit = 10,
+      semanticWeight = 0.7, // 0 = keyword only, 1 = semantic only
+      filters,
+    } = req.body;
+
+    if (!collection || !query) {
+      return res.status(400).json({ error: 'collection and query are required' });
+    }
+
+    // Build filter
+    let filter: Record<string, unknown> | undefined;
+    if (filters) {
+      const conditions: any[] = [];
+      if (filters.language) {
+        conditions.push({ key: 'language', match: { value: filters.language } });
+      }
+      if (filters.path) {
+        conditions.push({ key: 'file', match: { text: filters.path } });
+      }
+      if (conditions.length > 0) {
+        filter = { must: conditions };
+      }
+    }
+
+    // 1. Semantic search
+    const queryEmbedding = await embeddingService.embed(query);
+    const semanticResults = await vectorStore.search(collection, queryEmbedding, limit * 2, filter);
+
+    // 2. Keyword search (using Qdrant text match)
+    const keywords = query.toLowerCase().split(/\s+/).filter((w: string) => w.length > 2);
+    let keywordResults: typeof semanticResults = [];
+
+    if (keywords.length > 0 && semanticWeight < 1) {
+      // Search for each keyword in content
+      const keywordFilter = {
+        should: keywords.map((kw: string) => ({
+          key: 'content',
+          match: { text: kw },
+        })),
+        ...(filter ? { must: (filter as any).must } : {}),
+      };
+
+      // Use a dummy vector for keyword-only search (Qdrant requires a vector)
+      // We'll rely on filtering and then sort by match count
+      keywordResults = await vectorStore.search(
+        collection,
+        queryEmbedding, // Still need semantic for initial retrieval
+        limit * 2,
+        keywordFilter
+      );
+    }
+
+    // 3. Fusion: Combine and re-rank results
+    const resultMap = new Map<string, { result: typeof semanticResults[0]; semanticScore: number; keywordScore: number }>();
+
+    // Add semantic results
+    for (let i = 0; i < semanticResults.length; i++) {
+      const r = semanticResults[i];
+      const id = r.id;
+      resultMap.set(id, {
+        result: r,
+        semanticScore: r.score,
+        keywordScore: 0,
+      });
+    }
+
+    // Add/update with keyword results
+    for (let i = 0; i < keywordResults.length; i++) {
+      const r = keywordResults[i];
+      const id = r.id;
+      const content = String(r.payload.content || '').toLowerCase();
+      // Count keyword matches
+      const matchCount = keywords.filter((kw: string) => content.includes(kw)).length;
+      const keywordScore = matchCount / keywords.length;
+
+      if (resultMap.has(id)) {
+        resultMap.get(id)!.keywordScore = keywordScore;
+      } else {
+        resultMap.set(id, {
+          result: r,
+          semanticScore: r.score * 0.5, // Lower semantic score for keyword-only matches
+          keywordScore,
+        });
+      }
+    }
+
+    // Calculate combined score and sort
+    const combinedResults = Array.from(resultMap.values())
+      .map(({ result, semanticScore, keywordScore }) => ({
+        ...result,
+        score: semanticWeight * semanticScore + (1 - semanticWeight) * keywordScore,
+        semanticScore,
+        keywordScore,
+      }))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, limit);
+
+    res.json({
+      results: combinedResults.map(r => ({
+        file: r.payload.file,
+        content: r.payload.content,
+        language: r.payload.language,
+        score: r.score,
+        semanticScore: r.semanticScore,
+        keywordScore: r.keywordScore,
+      })),
+      query,
+      semanticWeight,
+    });
+  } catch (error: any) {
+    logger.error('Hybrid search failed', { error: error.message });
+    res.status(500).json({ error: 'Hybrid search failed' });
+  }
+});
+
+/**
  * Ask a question about the codebase (RAG)
  * POST /api/ask
  */

@@ -10,6 +10,7 @@ import { embeddingService } from './embedding';
 import { logger } from '../utils/logger';
 
 export type MemoryType = 'decision' | 'insight' | 'context' | 'todo' | 'conversation' | 'note';
+export type MemorySource = 'manual' | 'auto_conversation' | 'auto_pattern' | 'auto_feedback';
 export type TodoStatus = 'pending' | 'in_progress' | 'done' | 'cancelled';
 
 export interface Memory {
@@ -24,6 +25,11 @@ export interface Memory {
   // For todos
   status?: TodoStatus;
   statusHistory?: { status: TodoStatus; timestamp: string; note?: string }[];
+  // Auto-learning fields
+  source?: MemorySource;
+  confidence?: number; // 0-1 confidence score for auto-extracted memories
+  validated?: boolean; // User validation status
+  originalContext?: string; // Source conversation/context
 }
 
 export interface MemorySearchResult {

@@ -158,6 +158,142 @@ const TOOLS = [
       required: ["code"],
     },
   },
+  // Grouped search - one result per file
+  {
+    name: "grouped_search",
+    description: `Search ${PROJECT_NAME} codebase with results grouped by file. Returns one best match per file instead of multiple chunks.`,
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        query: {
+          type: "string",
+          description: "Search query",
+        },
+        groupBy: {
+          type: "string",
+          description: "Field to group by (default: 'file')",
+          default: "file",
+        },
+        limit: {
+          type: "number",
+          description: "Max groups to return (default: 10)",
+          default: 10,
+        },
+        language: {
+          type: "string",
+          description: "Filter by language",
+        },
+      },
+      required: ["query"],
+    },
+  },
+  // Hybrid search - keyword + semantic
+  {
+    name: "hybrid_search",
+    description: `Hybrid search combining keyword matching and semantic similarity for ${PROJECT_NAME}. Better for finding exact terms + related concepts.`,
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        query: {
+          type: "string",
+          description: "Search query",
+        },
+        limit: {
+          type: "number",
+          description: "Max results (default: 10)",
+          default: 10,
+        },
+        semanticWeight: {
+          type: "number",
+          description: "Weight for semantic vs keyword (0-1, default: 0.7)",
+          default: 0.7,
+        },
+        language: {
+          type: "string",
+          description: "Filter by language",
+        },
+      },
+      required: ["query"],
+    },
+  },
+  // Conversation analysis
+  {
+    name: "analyze_conversation",
+    description: `Analyze a conversation to extract learnings, decisions, and insights for ${PROJECT_NAME}. Optionally auto-saves to memory.`,
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        conversation: {
+          type: "string",
+          description: "The conversation text to analyze",
+        },
+        context: {
+          type: "string",
+          description: "Additional context about the conversation",
+        },
+        autoSave: {
+          type: "boolean",
+          description: "Automatically save extracted learnings to memory (default: false)",
+          default: false,
+        },
+        minConfidence: {
+          type: "number",
+          description: "Minimum confidence score for learnings (0-1, default: 0.6)",
+          default: 0.6,
+        },
+      },
+      required: ["conversation"],
+    },
+  },
+  // Auto-remember with classification
+  {
+    name: "auto_remember",
+    description: `Automatically classify and remember information for ${PROJECT_NAME}. Uses AI to determine the best memory type and tags.`,
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        content: {
+          type: "string",
+          description: "Content to remember",
+        },
+        context: {
+          type: "string",
+          description: "Context to help classify the memory",
+        },
+      },
+      required: ["content"],
+    },
+  },
+  // Tool analytics
+  {
+    name: "get_tool_analytics",
+    description: `Get analytics about tool usage in ${PROJECT_NAME}. Shows popular tools, success rates, and performance metrics.`,
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        days: {
+          type: "number",
+          description: "Number of days to analyze (default: 7)",
+          default: 7,
+        },
+      },
+    },
+  },
+  // Knowledge gaps
+  {
+    name: "get_knowledge_gaps",
+    description: `Identify knowledge gaps in ${PROJECT_NAME} based on queries with low results. Helps identify missing documentation.`,
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        limit: {
+          type: "number",
+          description: "Max gaps to return (default: 20)",
+          default: 20,
+        },
+      },
+    },
+  },
   {
     name: "get_project_stats",
     description: `Get statistics about the ${PROJECT_NAME} codebase.`,
@@ -1114,6 +1250,199 @@ async function handleTool(name: string, args: Record<string, unknown>): Promise<
               "\n```"
           )
           .join("\n\n---\n\n");
+      }
+
+      case "grouped_search": {
+        const { query, groupBy = 'file', limit = 10, language } = args as {
+          query: string;
+          groupBy?: string;
+          limit?: number;
+          language?: string;
+        };
+        const response = await api.post("/api/search-grouped", {
+          collection: `${COLLECTION_PREFIX}codebase`,
+          query,
+          groupBy,
+          limit,
+          filters: language ? { language } : undefined,
+        });
+        const groups = response.data.groups;
+        if (!groups || groups.length === 0) {
+          return "No results found.";
+        }
+        return groups
+          .map((g: any) => {
+            const r = g.results[0];
+            return `**${g[groupBy]}** (score: ${(r.score * 100).toFixed(1)}%)\n` +
+              "```" + (r.language || "") + "\n" +
+              r.content.slice(0, 300) +
+              "\n```";
+          })
+          .join("\n\n---\n\n");
+      }
+
+      case "hybrid_search": {
+        const { query, limit = 10, semanticWeight = 0.7, language } = args as {
+          query: string;
+          limit?: number;
+          semanticWeight?: number;
+          language?: string;
+        };
+        const response = await api.post("/api/search-hybrid", {
+          collection: `${COLLECTION_PREFIX}codebase`,
+          query,
+          limit,
+          semanticWeight,
+          filters: language ? { language } : undefined,
+        });
+        const results = response.data.results;
+        if (!results || results.length === 0) {
+          return "No results found.";
+        }
+        return results
+          .map((r: any) =>
+            `**${r.file}** (combined: ${(r.score * 100).toFixed(1)}%, semantic: ${(r.semanticScore * 100).toFixed(1)}%, keyword: ${(r.keywordScore * 100).toFixed(1)}%)\n` +
+            "```" + (r.language || "") + "\n" +
+            r.content.slice(0, 300) +
+            "\n```"
+          )
+          .join("\n\n---\n\n");
+      }
+
+      case "analyze_conversation": {
+        const { conversation, context, autoSave = false, minConfidence = 0.6 } = args as {
+          conversation: string;
+          context?: string;
+          autoSave?: boolean;
+          minConfidence?: number;
+        };
+        const response = await api.post("/api/analyze-conversation", {
+          projectName: PROJECT_NAME,
+          conversation,
+          context,
+          autoSave,
+          minConfidence,
+        });
+        const data = response.data;
+
+        let result = `# Conversation Analysis\n\n`;
+        result += `**Summary:** ${data.summary}\n\n`;
+
+        if (data.learnings.length > 0) {
+          result += `## Extracted Learnings (${data.learnings.length})\n\n`;
+          for (const learning of data.learnings) {
+            result += `### ${learning.type.toUpperCase()} (confidence: ${(learning.confidence * 100).toFixed(0)}%)\n`;
+            result += `${learning.content}\n`;
+            if (learning.tags.length > 0) {
+              result += `Tags: ${learning.tags.join(', ')}\n`;
+            }
+            result += `\n`;
+          }
+        }
+
+        if (data.entities.files.length > 0 || data.entities.functions.length > 0) {
+          result += `## Entities Mentioned\n`;
+          if (data.entities.files.length > 0) {
+            result += `- Files: ${data.entities.files.join(', ')}\n`;
+          }
+          if (data.entities.functions.length > 0) {
+            result += `- Functions: ${data.entities.functions.join(', ')}\n`;
+          }
+        }
+
+        if (autoSave && data.savedCount > 0) {
+          result += `\n✅ Saved ${data.savedCount} learnings to memory.`;
+        }
+
+        return result;
+      }
+
+      case "auto_remember": {
+        const { content, context } = args as { content: string; context?: string };
+
+        // First analyze to classify
+        const analysisResponse = await api.post("/api/analyze-conversation", {
+          projectName: PROJECT_NAME,
+          conversation: `Context: ${context || 'General note'}\n\nContent to remember: ${content}`,
+          autoSave: false,
+          minConfidence: 0.3,
+        });
+
+        const learnings = analysisResponse.data.learnings;
+        if (learnings.length === 0) {
+          // Fallback to manual remember
+          const rememberResponse = await api.post("/api/remember", {
+            projectName: PROJECT_NAME,
+            content,
+            type: 'note',
+            tags: ['auto-classified'],
+            metadata: { source: 'auto_remember', context },
+          });
+          return `Saved as note: ${rememberResponse.data.memory.id}`;
+        }
+
+        // Use the best classified learning
+        const best = learnings[0];
+        const rememberResponse = await api.post("/api/remember", {
+          projectName: PROJECT_NAME,
+          content: best.content || content,
+          type: best.type,
+          tags: [...(best.tags || []), 'auto-classified'],
+          relatedTo: best.relatedTo,
+          metadata: {
+            source: 'auto_remember',
+            confidence: best.confidence,
+            reasoning: best.reasoning,
+            context,
+          },
+        });
+
+        return `Saved as **${best.type}** (confidence: ${(best.confidence * 100).toFixed(0)}%)\n\nID: ${rememberResponse.data.memory.id}\nTags: ${best.tags?.join(', ') || 'none'}`;
+      }
+
+      case "get_tool_analytics": {
+        const { days = 7 } = args as { days?: number };
+        const response = await api.get(`/api/tool-analytics?projectName=${PROJECT_NAME}&days=${days}`);
+        const stats = response.data;
+
+        let result = `# Tool Analytics (Last ${days} days)\n\n`;
+        result += `- **Total Calls:** ${stats.totalCalls}\n`;
+        result += `- **Success Rate:** ${(stats.successRate * 100).toFixed(1)}%\n`;
+        result += `- **Avg Duration:** ${stats.avgDurationMs.toFixed(0)}ms\n\n`;
+
+        if (stats.topTools.length > 0) {
+          result += `## Top Tools\n`;
+          for (const tool of stats.topTools) {
+            result += `- ${tool.tool}: ${tool.count} calls\n`;
+          }
+        }
+
+        if (Object.keys(stats.errorsByTool).length > 0) {
+          result += `\n## Errors by Tool\n`;
+          for (const [tool, count] of Object.entries(stats.errorsByTool)) {
+            result += `- ${tool}: ${count} errors\n`;
+          }
+        }
+
+        return result;
+      }
+
+      case "get_knowledge_gaps": {
+        const { limit = 20 } = args as { limit?: number };
+        const response = await api.get(`/api/knowledge-gaps?projectName=${PROJECT_NAME}&limit=${limit}`);
+        const gaps = response.data.gaps;
+
+        if (!gaps || gaps.length === 0) {
+          return "No knowledge gaps identified. The codebase appears well-documented!";
+        }
+
+        let result = `# Knowledge Gaps\n\nThese queries frequently return low results, indicating potential documentation gaps:\n\n`;
+        for (const gap of gaps) {
+          result += `- **"${gap.query}"** (${gap.count} searches, avg ${gap.avgResultCount.toFixed(1)} results)\n`;
+          result += `  Tool: ${gap.toolName}\n\n`;
+        }
+
+        return result;
       }
 
       case "get_project_stats": {

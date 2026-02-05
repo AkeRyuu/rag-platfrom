@@ -265,6 +265,75 @@ class VectorStoreService {
   }
 
   /**
+   * Search vectors with grouping (returns one result per group)
+   */
+  async searchGroups(
+    collection: string,
+    vector: number[],
+    groupBy: string,
+    limit: number = 10,
+    groupSize: number = 1,
+    filter?: Record<string, unknown>,
+    scoreThreshold?: number
+  ): Promise<{ group: string; results: SearchResult[] }[]> {
+    try {
+      const response = await this.client.searchPointGroups(collection, {
+        vector,
+        group_by: groupBy,
+        limit,
+        group_size: groupSize,
+        with_payload: true,
+        filter: filter as any,
+        score_threshold: scoreThreshold,
+      });
+
+      return response.groups.map(group => ({
+        group: String(group.id),
+        results: group.hits.map(hit => ({
+          id: hit.id as string,
+          score: hit.score,
+          payload: hit.payload as Record<string, unknown>,
+        })),
+      }));
+    } catch (error: any) {
+      if (error.status === 404) {
+        return [];
+      }
+      // Fallback if groups API not supported - use regular search and group client-side
+      logger.warn('searchPointGroups failed, falling back to client-side grouping', { error: error.message });
+      const results = await this.search(collection, vector, limit * groupSize, filter, scoreThreshold);
+      return this.groupResultsClientSide(results, groupBy, limit, groupSize);
+    }
+  }
+
+  /**
+   * Client-side grouping fallback
+   */
+  private groupResultsClientSide(
+    results: SearchResult[],
+    groupBy: string,
+    limit: number,
+    groupSize: number
+  ): { group: string; results: SearchResult[] }[] {
+    const groups = new Map<string, SearchResult[]>();
+
+    for (const result of results) {
+      const groupValue = String(result.payload[groupBy] || 'unknown');
+      if (!groups.has(groupValue)) {
+        groups.set(groupValue, []);
+      }
+      const groupResults = groups.get(groupValue)!;
+      if (groupResults.length < groupSize) {
+        groupResults.push(result);
+      }
+    }
+
+    return Array.from(groups.entries())
+      .slice(0, limit)
+      .map(([group, results]) => ({ group, results }));
+  }
+
+  /**
    * Delete vectors by IDs
    */
   async delete(collection: string, ids: string[]): Promise<void> {
