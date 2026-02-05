@@ -786,6 +786,216 @@ class VectorStoreService {
       throw error;
     }
   }
+
+  // ============================================
+  // Quantization (Memory Optimization)
+  // ============================================
+
+  /**
+   * Enable scalar quantization on a collection to reduce memory usage ~4x
+   */
+  async enableQuantization(collection: string, quantile: number = 0.99): Promise<void> {
+    try {
+      await this.client.updateCollection(collection, {
+        quantization_config: {
+          scalar: {
+            type: 'int8',
+            quantile,
+            always_ram: true, // Keep quantized vectors in RAM for speed
+          },
+        },
+      });
+      logger.info(`Enabled quantization on collection: ${collection}`);
+    } catch (error: any) {
+      logger.error(`Failed to enable quantization on ${collection}`, { error: error.message });
+      throw error;
+    }
+  }
+
+  /**
+   * Disable quantization on a collection
+   */
+  async disableQuantization(collection: string): Promise<void> {
+    try {
+      await this.client.updateCollection(collection, {
+        quantization_config: null as any,
+      });
+      logger.info(`Disabled quantization on collection: ${collection}`);
+    } catch (error: any) {
+      logger.error(`Failed to disable quantization on ${collection}`, { error: error.message });
+      throw error;
+    }
+  }
+
+  // ============================================
+  // Snapshots (Backup & Restore)
+  // ============================================
+
+  /**
+   * Create a snapshot of a collection
+   */
+  async createSnapshot(collection: string): Promise<{ name: string; createdAt: string }> {
+    try {
+      const result = await this.client.createSnapshot(collection);
+      const snapshotName = result?.name || `snapshot_${Date.now()}`;
+      logger.info(`Created snapshot for ${collection}: ${snapshotName}`);
+      return {
+        name: snapshotName,
+        createdAt: new Date().toISOString(),
+      };
+    } catch (error: any) {
+      logger.error(`Failed to create snapshot for ${collection}`, { error: error.message });
+      throw error;
+    }
+  }
+
+  /**
+   * List snapshots for a collection
+   */
+  async listSnapshots(collection: string): Promise<Array<{ name: string; size: number; createdAt: string }>> {
+    try {
+      const snapshots = await this.client.listSnapshots(collection);
+      return snapshots.map((s: any) => ({
+        name: s.name,
+        size: s.size || 0,
+        createdAt: s.creation_time || new Date().toISOString(),
+      }));
+    } catch (error: any) {
+      logger.error(`Failed to list snapshots for ${collection}`, { error: error.message });
+      return [];
+    }
+  }
+
+  /**
+   * Delete a snapshot
+   */
+  async deleteSnapshot(collection: string, snapshotName: string): Promise<void> {
+    try {
+      await this.client.deleteSnapshot(collection, snapshotName);
+      logger.info(`Deleted snapshot ${snapshotName} from ${collection}`);
+    } catch (error: any) {
+      logger.error(`Failed to delete snapshot ${snapshotName}`, { error: error.message });
+      throw error;
+    }
+  }
+
+  /**
+   * Recover collection from a snapshot
+   */
+  async recoverFromSnapshot(collection: string, snapshotName: string): Promise<void> {
+    try {
+      // Note: Qdrant's recover requires the snapshot to be accessible
+      // This is a simplified implementation - full recovery may need file system access
+      await (this.client as any).recoverSnapshot(collection, {
+        location: snapshotName,
+      });
+      logger.info(`Recovered ${collection} from snapshot ${snapshotName}`);
+    } catch (error: any) {
+      logger.error(`Failed to recover from snapshot ${snapshotName}`, { error: error.message });
+      throw error;
+    }
+  }
+
+  // ============================================
+  // Analytics & Telemetry
+  // ============================================
+
+  /**
+   * Get detailed collection analytics
+   */
+  async getCollectionAnalytics(collection: string): Promise<{
+    vectorCount: number;
+    segmentsCount: number;
+    memoryUsageBytes: number;
+    diskUsageBytes: number;
+    indexedFieldsCount: number;
+    optimizerStatus: string;
+    quantizationEnabled: boolean;
+    avgVectorDensity?: number;
+    languageBreakdown: Record<string, number>;
+    fileCount: number;
+    lastIndexed?: string;
+  }> {
+    try {
+      const info = await this.client.getCollection(collection);
+      const stats = await this.aggregateStats(collection);
+
+      // Extract memory info from collection info
+      const memoryUsageBytes = (info as any).vectors_count * config.VECTOR_SIZE * 4; // Estimate: 4 bytes per float
+      const diskUsageBytes = (info as any).points_count * (config.VECTOR_SIZE * 4 + 500); // Estimate with payload
+
+      return {
+        vectorCount: info.points_count || 0,
+        segmentsCount: info.segments_count || 0,
+        memoryUsageBytes,
+        diskUsageBytes,
+        indexedFieldsCount: Object.keys((info.config?.params as any)?.payload_schema || {}).length,
+        optimizerStatus: typeof info.optimizer_status === 'object'
+          ? (info.optimizer_status as any).status || 'unknown'
+          : String(info.optimizer_status || 'ok'),
+        quantizationEnabled: !!(info.config?.quantization_config),
+        languageBreakdown: stats.languages,
+        fileCount: stats.totalFiles,
+        lastIndexed: stats.lastIndexed,
+      };
+    } catch (error: any) {
+      if (error.status === 404) {
+        return {
+          vectorCount: 0,
+          segmentsCount: 0,
+          memoryUsageBytes: 0,
+          diskUsageBytes: 0,
+          indexedFieldsCount: 0,
+          optimizerStatus: 'not_found',
+          quantizationEnabled: false,
+          languageBreakdown: {},
+          fileCount: 0,
+        };
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Get cluster health and performance info
+   */
+  async getClusterInfo(): Promise<{
+    status: string;
+    collectionsCount: number;
+    totalVectors: number;
+    totalMemoryBytes: number;
+  }> {
+    try {
+      const collections = await this.client.getCollections();
+      let totalVectors = 0;
+      let totalMemoryBytes = 0;
+
+      for (const col of collections.collections) {
+        try {
+          const info = await this.client.getCollection(col.name);
+          totalVectors += info.points_count || 0;
+          totalMemoryBytes += (info.points_count || 0) * config.VECTOR_SIZE * 4;
+        } catch {
+          // Skip inaccessible collections
+        }
+      }
+
+      return {
+        status: 'ok',
+        collectionsCount: collections.collections.length,
+        totalVectors,
+        totalMemoryBytes,
+      };
+    } catch (error: any) {
+      logger.error('Failed to get cluster info', { error: error.message });
+      return {
+        status: 'error',
+        collectionsCount: 0,
+        totalVectors: 0,
+        totalMemoryBytes: 0,
+      };
+    }
+  }
 }
 
 export const vectorStore = new VectorStoreService();

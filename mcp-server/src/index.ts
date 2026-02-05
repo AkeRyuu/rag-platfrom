@@ -1367,6 +1367,437 @@ const TOOLS = [
       },
     },
   },
+  // ============================================
+  // Q-Sprint 4: Analytics & Backup Tools
+  // ============================================
+  {
+    name: "get_analytics",
+    description: `Get detailed analytics for ${PROJECT_NAME} codebase. Shows vector counts, memory usage, language breakdown, and indexing health.`,
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        collection: {
+          type: "string",
+          description: "Collection to analyze (default: codebase)",
+          default: "codebase",
+        },
+      },
+    },
+  },
+  {
+    name: "backup_collection",
+    description: `Create a snapshot backup of a ${PROJECT_NAME} collection. Use for data safety before major changes.`,
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        collection: {
+          type: "string",
+          description: "Collection to backup (default: codebase)",
+          default: "codebase",
+        },
+      },
+    },
+  },
+  {
+    name: "list_backups",
+    description: `List available snapshot backups for ${PROJECT_NAME} collections.`,
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        collection: {
+          type: "string",
+          description: "Collection to list backups for (default: codebase)",
+          default: "codebase",
+        },
+      },
+    },
+  },
+  {
+    name: "enable_quantization",
+    description: `Enable scalar quantization on ${PROJECT_NAME} collections to reduce memory usage ~4x. May slightly reduce search accuracy.`,
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        collection: {
+          type: "string",
+          description: "Collection to optimize (default: codebase)",
+          default: "codebase",
+        },
+        quantile: {
+          type: "number",
+          description: "Quantization quantile 0-1 (default: 0.99)",
+          default: 0.99,
+        },
+      },
+    },
+  },
+  // ============================================
+  // M-Sprint 3: Proactive Intelligence Tools
+  // ============================================
+  {
+    name: "get_contextual_suggestions",
+    description: `Get proactive suggestions based on current context for ${PROJECT_NAME}. Analyzes text for files, errors, concepts and suggests relevant resources.`,
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        text: {
+          type: "string",
+          description: "Current context text to analyze",
+        },
+        currentFile: {
+          type: "string",
+          description: "Currently open file path",
+        },
+        recentFiles: {
+          type: "array",
+          items: { type: "string" },
+          description: "Recently accessed file paths",
+        },
+        sessionId: {
+          type: "string",
+          description: "Current session ID for personalized suggestions",
+        },
+      },
+      required: ["text"],
+    },
+  },
+  {
+    name: "start_session",
+    description: `Start a new coding session for ${PROJECT_NAME}. Initializes context tracking and enables session-based features.`,
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        sessionId: {
+          type: "string",
+          description: "Custom session ID (auto-generated if not provided)",
+        },
+        initialContext: {
+          type: "string",
+          description: "Initial context text (what you're working on)",
+        },
+        resumeFrom: {
+          type: "string",
+          description: "Previous session ID to resume from",
+        },
+      },
+    },
+  },
+  {
+    name: "get_session_context",
+    description: `Get current session context for ${PROJECT_NAME}. Shows recent files, queries, tools used, and accumulated learnings.`,
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        sessionId: {
+          type: "string",
+          description: "Session ID to retrieve",
+        },
+      },
+      required: ["sessionId"],
+    },
+  },
+  {
+    name: "end_session",
+    description: `End a coding session for ${PROJECT_NAME}. Saves learnings and generates session summary.`,
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        sessionId: {
+          type: "string",
+          description: "Session ID to end",
+        },
+        summary: {
+          type: "string",
+          description: "Optional session summary",
+        },
+        autoSaveLearnings: {
+          type: "boolean",
+          description: "Save accumulated learnings to memory (default: true)",
+          default: true,
+        },
+        feedback: {
+          type: "string",
+          enum: ["productive", "neutral", "unproductive"],
+          description: "Session productivity feedback",
+        },
+      },
+      required: ["sessionId"],
+    },
+  },
+  // ============================================
+  // M-Sprint 4: Feedback & Quality Tools
+  // ============================================
+  {
+    name: "feedback_search",
+    description: `Submit feedback for a search result in ${PROJECT_NAME}. Helps improve search quality over time.`,
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        queryId: {
+          type: "string",
+          description: "ID of the query (for tracking)",
+        },
+        query: {
+          type: "string",
+          description: "The search query that was used",
+        },
+        resultId: {
+          type: "string",
+          description: "ID of the result being rated",
+        },
+        resultFile: {
+          type: "string",
+          description: "File path of the result",
+        },
+        feedbackType: {
+          type: "string",
+          enum: ["helpful", "not_helpful", "partially_helpful"],
+          description: "Type of feedback",
+        },
+        betterQuery: {
+          type: "string",
+          description: "Suggested better query (if result was not helpful)",
+        },
+        comment: {
+          type: "string",
+          description: "Additional comment about the feedback",
+        },
+      },
+      required: ["queryId", "query", "resultId", "feedbackType"],
+    },
+  },
+  {
+    name: "feedback_memory",
+    description: `Submit feedback for a memory in ${PROJECT_NAME}. Helps maintain memory accuracy.`,
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        memoryId: {
+          type: "string",
+          description: "ID of the memory",
+        },
+        memoryContent: {
+          type: "string",
+          description: "Content of the memory",
+        },
+        feedbackType: {
+          type: "string",
+          enum: ["accurate", "outdated", "incorrect"],
+          description: "Type of feedback",
+        },
+        correction: {
+          type: "string",
+          description: "Corrected content if memory is incorrect/outdated",
+        },
+        comment: {
+          type: "string",
+          description: "Additional comment",
+        },
+      },
+      required: ["memoryId", "memoryContent", "feedbackType"],
+    },
+  },
+  {
+    name: "suggest_better_query",
+    description: `Get suggestions for better search queries based on learned patterns in ${PROJECT_NAME}.`,
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        query: {
+          type: "string",
+          description: "The original query to improve",
+        },
+        context: {
+          type: "string",
+          description: "Additional context about what you're looking for",
+        },
+      },
+      required: ["query"],
+    },
+  },
+  {
+    name: "get_quality_metrics",
+    description: `Get search and memory quality metrics for ${PROJECT_NAME}. Shows helpful rates, accuracy, and trends.`,
+    inputSchema: {
+      type: "object" as const,
+      properties: {},
+    },
+  },
+  // ============================================
+  // M-Sprint 5: Code Suggestion Tools
+  // ============================================
+  {
+    name: "suggest_related_code",
+    description: `Find code related to a given snippet or description in ${PROJECT_NAME}. Useful for understanding dependencies and similar patterns.`,
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        code: {
+          type: "string",
+          description: "Code snippet to find related code for",
+        },
+        description: {
+          type: "string",
+          description: "Description of what you're looking for",
+        },
+        currentFile: {
+          type: "string",
+          description: "Current file to exclude from results",
+        },
+        limit: {
+          type: "number",
+          description: "Max results (default: 10)",
+          default: 10,
+        },
+      },
+    },
+  },
+  {
+    name: "suggest_implementation",
+    description: `Get implementation pattern suggestions based on target code in ${PROJECT_NAME}. Shows similar patterns, related imports, and adaptation hints.`,
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        targetCode: {
+          type: "string",
+          description: "The code you want to implement",
+        },
+        targetDescription: {
+          type: "string",
+          description: "Description of what the code should do",
+        },
+        currentFile: {
+          type: "string",
+          description: "Current file to exclude from results",
+        },
+        limit: {
+          type: "number",
+          description: "Max suggestions (default: 5)",
+          default: 5,
+        },
+      },
+      required: ["targetCode"],
+    },
+  },
+  {
+    name: "suggest_tests",
+    description: `Get test pattern suggestions for given code in ${PROJECT_NAME}. Shows similar test structures and frameworks used.`,
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        code: {
+          type: "string",
+          description: "Code to find test patterns for",
+        },
+        filePath: {
+          type: "string",
+          description: "File path for context",
+        },
+        testType: {
+          type: "string",
+          enum: ["unit", "integration", "e2e"],
+          description: "Filter by test type",
+        },
+        limit: {
+          type: "number",
+          description: "Max suggestions (default: 5)",
+          default: 5,
+        },
+      },
+      required: ["code"],
+    },
+  },
+  {
+    name: "get_code_context",
+    description: `Get comprehensive code context for a snippet in ${PROJECT_NAME}. Returns related code, test patterns, and imports.`,
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        code: {
+          type: "string",
+          description: "Code snippet to analyze",
+        },
+        includeRelated: {
+          type: "boolean",
+          description: "Include related code (default: true)",
+          default: true,
+        },
+        includeTests: {
+          type: "boolean",
+          description: "Include test patterns (default: true)",
+          default: true,
+        },
+        includeImports: {
+          type: "boolean",
+          description: "Include import analysis (default: true)",
+          default: true,
+        },
+      },
+      required: ["code"],
+    },
+  },
+  // ============================================
+  // RAG Guidelines & Configuration
+  // ============================================
+  {
+    name: "get_rag_guidelines",
+    description: `Get recommended settings and best practices for working with RAG in ${PROJECT_NAME}. Shows optimal tool usage patterns, query strategies, and session management tips.`,
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        focus: {
+          type: "string",
+          enum: ["all", "search", "memory", "session", "feedback", "performance"],
+          description: "Focus area for guidelines (default: all)",
+          default: "all",
+        },
+        context: {
+          type: "string",
+          enum: ["coding", "debugging", "reviewing", "learning", "documenting"],
+          description: "Current work context for tailored recommendations",
+        },
+      },
+    },
+  },
+  // ============================================
+  // Cache Management Tools
+  // ============================================
+  {
+    name: "get_cache_stats",
+    description: `Get cache statistics for ${PROJECT_NAME}. Shows hit rates, cache levels, and memory usage.`,
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        sessionId: {
+          type: "string",
+          description: "Optional session ID for session-specific stats",
+        },
+      },
+    },
+  },
+  {
+    name: "warm_cache",
+    description: `Warm the embedding cache for ${PROJECT_NAME}. Pre-loads frequently used embeddings for faster responses.`,
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        sessionId: {
+          type: "string",
+          description: "Session ID to warm cache for",
+        },
+        previousSessionId: {
+          type: "string",
+          description: "Previous session to copy cache from (for session resumption)",
+        },
+        recentQueries: {
+          type: "array",
+          items: { type: "string" },
+          description: "Recent queries to pre-warm in cache",
+        },
+      },
+      required: ["sessionId"],
+    },
+  },
 ];
 
 // Tool handlers
@@ -4016,6 +4447,1090 @@ ${transitions ? `### State Transitions\n${transitions}` : ""}`;
           result += `\nTo validate: \`validate_memory(memoryId="${m.id}", validated=true)\`\n`;
           result += `To reject: \`validate_memory(memoryId="${m.id}", validated=false)\`\n\n`;
         });
+
+        return result;
+      }
+
+      // ============================================
+      // Q-Sprint 4: Analytics & Backup Handlers
+      // ============================================
+
+      case "get_analytics": {
+        const { collection = "codebase" } = args as {
+          collection?: string;
+        };
+
+        const collectionName = `${PROJECT_NAME}_${collection}`;
+        const response = await api.get(`/api/analytics/${collectionName}`);
+        const analytics = response.data;
+
+        let result = `# 📊 Collection Analytics: ${collectionName}\n\n`;
+        result += `## Overview\n`;
+        result += `- **Vectors**: ${analytics.vectorCount.toLocaleString()}\n`;
+        result += `- **Files**: ${analytics.fileCount.toLocaleString()}\n`;
+        result += `- **Segments**: ${analytics.segmentsCount}\n`;
+        result += `- **Optimizer**: ${analytics.optimizerStatus}\n`;
+        result += `- **Quantization**: ${analytics.quantizationEnabled ? 'Enabled ✅' : 'Disabled'}\n\n`;
+
+        result += `## Memory Usage\n`;
+        result += `- **RAM**: ~${(analytics.memoryUsageBytes / 1024 / 1024).toFixed(1)} MB\n`;
+        result += `- **Disk**: ~${(analytics.diskUsageBytes / 1024 / 1024).toFixed(1)} MB\n\n`;
+
+        if (Object.keys(analytics.languageBreakdown).length > 0) {
+          result += `## Language Breakdown\n`;
+          Object.entries(analytics.languageBreakdown)
+            .sort((a, b) => (b[1] as number) - (a[1] as number))
+            .slice(0, 10)
+            .forEach(([lang, count]) => {
+              result += `- **${lang}**: ${count} chunks\n`;
+            });
+          result += "\n";
+        }
+
+        if (analytics.lastIndexed) {
+          result += `**Last Indexed**: ${analytics.lastIndexed}\n`;
+        }
+
+        return result;
+      }
+
+      case "backup_collection": {
+        const { collection = "codebase" } = args as {
+          collection?: string;
+        };
+
+        const collectionName = `${PROJECT_NAME}_${collection}`;
+        const response = await api.post(`/api/collections/${collectionName}/snapshots`);
+        const { snapshot } = response.data;
+
+        return `✅ Backup created successfully!\n\n` +
+          `- **Collection**: ${collectionName}\n` +
+          `- **Snapshot**: ${snapshot.name}\n` +
+          `- **Created**: ${snapshot.createdAt}\n\n` +
+          `Use \`list_backups\` to see all available backups.`;
+      }
+
+      case "list_backups": {
+        const { collection = "codebase" } = args as {
+          collection?: string;
+        };
+
+        const collectionName = `${PROJECT_NAME}_${collection}`;
+        const response = await api.get(`/api/collections/${collectionName}/snapshots`);
+        const { snapshots } = response.data;
+
+        if (snapshots.length === 0) {
+          return `No backups found for ${collectionName}. Use \`backup_collection\` to create one.`;
+        }
+
+        let result = `# 💾 Backups for ${collectionName}\n\n`;
+        snapshots.forEach((s: { name: string; size: number; createdAt: string }) => {
+          result += `- **${s.name}**\n`;
+          result += `  - Size: ${(s.size / 1024 / 1024).toFixed(1)} MB\n`;
+          result += `  - Created: ${s.createdAt}\n\n`;
+        });
+
+        return result;
+      }
+
+      case "enable_quantization": {
+        const { collection = "codebase", quantile = 0.99 } = args as {
+          collection?: string;
+          quantile?: number;
+        };
+
+        const collectionName = `${PROJECT_NAME}_${collection}`;
+        await api.post(`/api/collections/${collectionName}/quantization`, { quantile });
+
+        return `✅ Quantization enabled on ${collectionName}\n\n` +
+          `- **Quantile**: ${quantile}\n` +
+          `- **Expected memory reduction**: ~4x\n\n` +
+          `Note: Search accuracy may be slightly reduced. The optimizer will process this in the background.`;
+      }
+
+      // ============================================
+      // M-Sprint 3: Proactive Intelligence Handlers
+      // ============================================
+
+      case "get_contextual_suggestions": {
+        const { text, currentFile, recentFiles, sessionId } = args as {
+          text: string;
+          currentFile?: string;
+          recentFiles?: string[];
+          sessionId?: string;
+        };
+
+        const response = await api.post("/api/suggestions", {
+          text,
+          currentFile,
+          recentFiles,
+          sessionId,
+        });
+
+        const { triggers, suggestions, relatedMemories, estimatedRelevance } = response.data;
+
+        let result = `# 💡 Contextual Suggestions\n\n`;
+        result += `**Relevance Score**: ${(estimatedRelevance * 100).toFixed(0)}%\n\n`;
+
+        if (triggers && triggers.length > 0) {
+          result += `## Detected Triggers\n`;
+          triggers.forEach((t: { type: string; value: string; confidence: number }) => {
+            result += `- [${t.type}] ${t.value.slice(0, 50)} (${(t.confidence * 100).toFixed(0)}%)\n`;
+          });
+          result += "\n";
+        }
+
+        if (suggestions && suggestions.length > 0) {
+          result += `## Suggestions\n`;
+          suggestions.forEach((s: { type: string; title: string; description: string; reason: string; relevance: number }) => {
+            result += `### ${s.title}\n`;
+            result += `- **Type**: ${s.type}\n`;
+            result += `- **Description**: ${s.description}\n`;
+            result += `- **Reason**: ${s.reason}\n`;
+            result += `- **Relevance**: ${(s.relevance * 100).toFixed(0)}%\n\n`;
+          });
+        }
+
+        if (relatedMemories && relatedMemories.length > 0) {
+          result += `## Related Memories\n`;
+          relatedMemories.slice(0, 3).forEach((m: { type: string; content: string; score: number }) => {
+            result += `- [${m.type}] ${m.content.slice(0, 80)}... (${(m.score * 100).toFixed(0)}%)\n`;
+          });
+        }
+
+        return result;
+      }
+
+      case "start_session": {
+        const { sessionId, initialContext, resumeFrom } = args as {
+          sessionId?: string;
+          initialContext?: string;
+          resumeFrom?: string;
+        };
+
+        const response = await api.post("/api/session/start", {
+          sessionId,
+          initialContext,
+          resumeFrom,
+        });
+
+        const { session } = response.data;
+
+        let result = `✅ Session started!\n\n`;
+        result += `- **Session ID**: \`${session.sessionId}\`\n`;
+        result += `- **Started**: ${session.startedAt}\n`;
+        if (resumeFrom) {
+          result += `- **Resumed from**: ${resumeFrom}\n`;
+        }
+        if (session.currentFiles.length > 0) {
+          result += `- **Initial files**: ${session.currentFiles.join(', ')}\n`;
+        }
+        result += `\nUse this session ID for contextual suggestions and activity tracking.`;
+
+        return result;
+      }
+
+      case "get_session_context": {
+        const { sessionId } = args as {
+          sessionId: string;
+        };
+
+        const response = await api.get(`/api/session/${sessionId}`);
+        const { session } = response.data;
+
+        let result = `# 📋 Session Context\n\n`;
+        result += `- **Session ID**: ${session.sessionId}\n`;
+        result += `- **Status**: ${session.status}\n`;
+        result += `- **Started**: ${session.startedAt}\n`;
+        result += `- **Last Activity**: ${session.lastActivityAt}\n\n`;
+
+        if (session.currentFiles.length > 0) {
+          result += `## Current Files (${session.currentFiles.length})\n`;
+          session.currentFiles.slice(0, 10).forEach((f: string) => {
+            result += `- ${f}\n`;
+          });
+          result += "\n";
+        }
+
+        if (session.toolsUsed.length > 0) {
+          result += `## Tools Used\n`;
+          result += session.toolsUsed.join(', ') + "\n\n";
+        }
+
+        if (session.activeFeatures.length > 0) {
+          result += `## Active Features\n`;
+          session.activeFeatures.forEach((f: string) => {
+            result += `- ${f}\n`;
+          });
+          result += "\n";
+        }
+
+        if (session.pendingLearnings.length > 0) {
+          result += `## Pending Learnings (${session.pendingLearnings.length})\n`;
+          session.pendingLearnings.slice(0, 5).forEach((l: string) => {
+            result += `- ${l.slice(0, 80)}...\n`;
+          });
+        }
+
+        return result;
+      }
+
+      case "end_session": {
+        const { sessionId, summary, autoSaveLearnings = true, feedback } = args as {
+          sessionId: string;
+          summary?: string;
+          autoSaveLearnings?: boolean;
+          feedback?: string;
+        };
+
+        const response = await api.post(`/api/session/${sessionId}/end`, {
+          summary,
+          autoSaveLearnings,
+          feedback,
+        });
+
+        const result = response.data;
+
+        let output = `✅ Session ended!\n\n`;
+        output += `## Summary\n`;
+        output += `${result.summary}\n\n`;
+        output += `## Stats\n`;
+        output += `- **Duration**: ${Math.round(result.duration / 60000)} minutes\n`;
+        output += `- **Tools Used**: ${result.toolsUsed.length}\n`;
+        output += `- **Files Affected**: ${result.filesAffected.length}\n`;
+        output += `- **Queries**: ${result.queriesCount}\n`;
+        output += `- **Learnings Saved**: ${result.learningsSaved}\n`;
+
+        if (result.filesAffected.length > 0) {
+          output += `\n## Files Affected\n`;
+          result.filesAffected.slice(0, 10).forEach((f: string) => {
+            output += `- ${f}\n`;
+          });
+        }
+
+        return output;
+      }
+
+      // ============================================
+      // M-Sprint 4: Feedback & Quality Handlers
+      // ============================================
+
+      case "feedback_search": {
+        const { queryId, query, resultId, resultFile, feedbackType, betterQuery, comment } = args as {
+          queryId: string;
+          query: string;
+          resultId: string;
+          resultFile?: string;
+          feedbackType: string;
+          betterQuery?: string;
+          comment?: string;
+        };
+
+        const response = await api.post("/api/feedback/search", {
+          queryId,
+          query,
+          resultId,
+          resultFile,
+          feedbackType,
+          betterQuery,
+          comment,
+        });
+
+        const feedbackEmoji = feedbackType === 'helpful' ? '👍' :
+                              feedbackType === 'not_helpful' ? '👎' : '🤔';
+
+        let result = `${feedbackEmoji} **Search Feedback Recorded**\n\n`;
+        result += `- **Query**: "${query.slice(0, 50)}${query.length > 50 ? '...' : ''}"\n`;
+        result += `- **Feedback**: ${feedbackType}\n`;
+        if (resultFile) result += `- **File**: ${resultFile}\n`;
+        if (betterQuery) result += `- **Suggested Query**: "${betterQuery}"\n`;
+        result += `\nThis feedback helps improve search quality!`;
+
+        return result;
+      }
+
+      case "feedback_memory": {
+        const { memoryId, memoryContent, feedbackType, correction, comment } = args as {
+          memoryId: string;
+          memoryContent: string;
+          feedbackType: string;
+          correction?: string;
+          comment?: string;
+        };
+
+        const response = await api.post("/api/feedback/memory", {
+          memoryId,
+          memoryContent,
+          feedbackType,
+          correction,
+          comment,
+        });
+
+        const feedbackEmoji = feedbackType === 'accurate' ? '✅' :
+                              feedbackType === 'outdated' ? '⏰' : '❌';
+
+        let result = `${feedbackEmoji} **Memory Feedback Recorded**\n\n`;
+        result += `- **Memory ID**: ${memoryId}\n`;
+        result += `- **Feedback**: ${feedbackType}\n`;
+        if (correction) result += `- **Correction**: ${correction.slice(0, 100)}...\n`;
+        result += `\nThis feedback helps maintain accurate knowledge!`;
+
+        return result;
+      }
+
+      case "suggest_better_query": {
+        const { query, context } = args as {
+          query: string;
+          context?: string;
+        };
+
+        const response = await api.post("/api/query/suggest", {
+          query,
+          context,
+        });
+
+        const { suggestions } = response.data;
+
+        if (!suggestions || suggestions.length === 0) {
+          // Also analyze the query
+          const analysisResponse = await api.post("/api/query/analyze", { query });
+          const { issues, suggestions: tips } = analysisResponse.data;
+
+          let result = `💡 **Query Analysis for**: "${query}"\n\n`;
+          if (issues && issues.length > 0) {
+            result += `## Issues\n`;
+            issues.forEach((i: string) => result += `- ⚠️ ${i}\n`);
+            result += "\n";
+          }
+          if (tips && tips.length > 0) {
+            result += `## Suggestions\n`;
+            tips.forEach((t: string) => result += `- 💡 ${t}\n`);
+          }
+          if (issues.length === 0 && tips.length === 0) {
+            result += `Your query looks good! No improvements suggested.`;
+          }
+          return result;
+        }
+
+        let result = `💡 **Better Query Suggestions**\n\n`;
+        result += `Original: "${query}"\n\n`;
+
+        suggestions.forEach((s: { suggestedQuery: string; confidence: number; reason: string; source: string }, i: number) => {
+          const sourceEmoji = s.source === 'feedback' ? '📊' :
+                              s.source === 'pattern' ? '🔄' : '🤖';
+          result += `### ${i + 1}. "${s.suggestedQuery}"\n`;
+          result += `${sourceEmoji} ${s.reason}\n`;
+          result += `Confidence: ${(s.confidence * 100).toFixed(0)}%\n\n`;
+        });
+
+        return result;
+      }
+
+      case "get_quality_metrics": {
+        const response = await api.get(`/api/quality/${PROJECT_NAME}`);
+        const metrics = response.data;
+
+        let result = `# 📊 Quality Metrics for ${PROJECT_NAME}\n\n`;
+
+        result += `## Search Quality\n`;
+        result += `- **Helpful Rate**: ${(metrics.searchQuality.helpfulRate * 100).toFixed(1)}%\n`;
+        result += `- **Partially Helpful**: ${(metrics.searchQuality.partiallyHelpfulRate * 100).toFixed(1)}%\n`;
+        result += `- **Not Helpful**: ${(metrics.searchQuality.notHelpfulRate * 100).toFixed(1)}%\n`;
+        result += `- **Total Feedback**: ${metrics.searchQuality.totalFeedback}\n\n`;
+
+        result += `## Memory Quality\n`;
+        result += `- **Accuracy Rate**: ${(metrics.memoryQuality.accuracyRate * 100).toFixed(1)}%\n`;
+        result += `- **Outdated Rate**: ${(metrics.memoryQuality.outdatedRate * 100).toFixed(1)}%\n`;
+        result += `- **Incorrect Rate**: ${(metrics.memoryQuality.incorrectRate * 100).toFixed(1)}%\n`;
+        result += `- **Total Feedback**: ${metrics.memoryQuality.totalFeedback}\n\n`;
+
+        result += `## Trends\n`;
+        const trendEmoji = metrics.trends.trend === 'up' ? '📈' :
+                          metrics.trends.trend === 'down' ? '📉' : '➡️';
+        result += `- **Last 7 Days**: ${metrics.trends.last7Days} feedback items\n`;
+        result += `- **Last 30 Days**: ${metrics.trends.last30Days} feedback items\n`;
+        result += `- **Trend**: ${trendEmoji} ${metrics.trends.trend}\n\n`;
+
+        if (metrics.topProblematicQueries && metrics.topProblematicQueries.length > 0) {
+          result += `## ⚠️ Problematic Queries\n`;
+          metrics.topProblematicQueries.slice(0, 5).forEach((q: { query: string; notHelpfulCount: number }) => {
+            result += `- "${q.query}" (${q.notHelpfulCount} unhelpful results)\n`;
+          });
+        }
+
+        return result;
+      }
+
+      // ============================================
+      // M-Sprint 5: Code Suggestion Handlers
+      // ============================================
+
+      case "suggest_related_code": {
+        const { code, description, currentFile, limit = 10 } = args as {
+          code?: string;
+          description?: string;
+          currentFile?: string;
+          limit?: number;
+        };
+
+        if (!code && !description) {
+          return "Please provide either code or description to find related code.";
+        }
+
+        const response = await api.post("/api/code/related", {
+          code,
+          description,
+          currentFile,
+          limit,
+        });
+
+        const { suggestions, totalFound, context } = response.data;
+
+        if (!suggestions || suggestions.length === 0) {
+          return `No related code found. ${context}`;
+        }
+
+        let result = `# 🔗 Related Code (${suggestions.length} of ${totalFound})\n\n`;
+        result += `_${context}_\n\n`;
+
+        suggestions.forEach((s: { file: string; content: string; score: number; reason: string; startLine?: number; language?: string }, i: number) => {
+          result += `### ${i + 1}. ${s.file}\n`;
+          result += `**Score**: ${(s.score * 100).toFixed(1)}% | **Reason**: ${s.reason}\n`;
+          if (s.startLine) result += `**Line**: ${s.startLine}\n`;
+          result += "```" + (s.language || "") + "\n";
+          result += s.content.slice(0, 300) + (s.content.length > 300 ? "\n..." : "");
+          result += "\n```\n\n";
+        });
+
+        return result;
+      }
+
+      case "suggest_implementation": {
+        const { targetCode, targetDescription, currentFile, limit = 5 } = args as {
+          targetCode: string;
+          targetDescription?: string;
+          currentFile?: string;
+          limit?: number;
+        };
+
+        const response = await api.post("/api/code/suggest-implementation", {
+          targetCode,
+          targetDescription,
+          currentFile,
+          limit,
+        });
+
+        const { suggestions } = response.data;
+
+        if (!suggestions || suggestions.length === 0) {
+          return "No implementation patterns found for this code.";
+        }
+
+        let result = `# 🏗️ Implementation Suggestions\n\n`;
+
+        const patternIcons: Record<string, string> = {
+          similar_structure: "📐",
+          same_domain: "🎯",
+          related_import: "📦",
+          test_pattern: "🧪",
+        };
+
+        suggestions.forEach((s: {
+          file: string;
+          content: string;
+          score: number;
+          reason: string;
+          patternType: string;
+          adaptationHints?: string[];
+          startLine?: number;
+          language?: string;
+        }, i: number) => {
+          const icon = patternIcons[s.patternType] || "📄";
+          result += `### ${i + 1}. ${icon} ${s.file}\n`;
+          result += `**Pattern**: ${s.patternType} | **Score**: ${(s.score * 100).toFixed(1)}%\n`;
+          result += `**Reason**: ${s.reason}\n`;
+
+          if (s.adaptationHints && s.adaptationHints.length > 0) {
+            result += `**Hints**:\n`;
+            s.adaptationHints.forEach(h => result += `- 💡 ${h}\n`);
+          }
+
+          result += "```" + (s.language || "") + "\n";
+          result += s.content.slice(0, 400) + (s.content.length > 400 ? "\n..." : "");
+          result += "\n```\n\n";
+        });
+
+        return result;
+      }
+
+      case "suggest_tests": {
+        const { code, filePath, testType, limit = 5 } = args as {
+          code: string;
+          filePath?: string;
+          testType?: string;
+          limit?: number;
+        };
+
+        const response = await api.post("/api/code/suggest-tests", {
+          code,
+          filePath,
+          testType,
+          limit,
+        });
+
+        const { suggestions } = response.data;
+
+        if (!suggestions || suggestions.length === 0) {
+          return "No test patterns found for this code. Make sure the codebase has test files indexed.";
+        }
+
+        let result = `# 🧪 Test Suggestions\n\n`;
+
+        const typeIcons: Record<string, string> = {
+          unit: "🔬",
+          integration: "🔗",
+          e2e: "🌐",
+        };
+
+        suggestions.forEach((s: {
+          file: string;
+          content: string;
+          score: number;
+          reason: string;
+          testType: string;
+          framework?: string;
+          coverage: string[];
+          startLine?: number;
+        }, i: number) => {
+          const icon = typeIcons[s.testType] || "📝";
+          result += `### ${i + 1}. ${icon} ${s.file}\n`;
+          result += `**Type**: ${s.testType}`;
+          if (s.framework) result += ` | **Framework**: ${s.framework}`;
+          result += ` | **Score**: ${(s.score * 100).toFixed(1)}%\n`;
+
+          if (s.coverage && s.coverage.length > 0) {
+            result += `**Coverage**:\n`;
+            s.coverage.slice(0, 5).forEach(c => result += `- ${c}\n`);
+          }
+
+          result += "```\n";
+          result += s.content.slice(0, 500) + (s.content.length > 500 ? "\n..." : "");
+          result += "\n```\n\n";
+        });
+
+        return result;
+      }
+
+      case "get_code_context": {
+        const { code, includeRelated = true, includeTests = true, includeImports = true } = args as {
+          code: string;
+          includeRelated?: boolean;
+          includeTests?: boolean;
+          includeImports?: boolean;
+        };
+
+        const response = await api.post("/api/code/context", {
+          code,
+          includeRelated,
+          includeTests,
+          includeImports,
+        });
+
+        const { related, tests, imports, summary } = response.data;
+
+        let result = `# 📦 Code Context\n\n`;
+        result += `_${summary}_\n\n`;
+
+        if (imports && imports.length > 0) {
+          result += `## 📥 Imports Found\n`;
+          imports.forEach((i: string) => result += `- ${i}\n`);
+          result += "\n";
+        }
+
+        if (related && related.length > 0) {
+          result += `## 🔗 Related Code (${related.length})\n`;
+          related.slice(0, 5).forEach((r: { file: string; score: number; reason: string }) => {
+            result += `- **${r.file}** (${(r.score * 100).toFixed(0)}%) - ${r.reason}\n`;
+          });
+          result += "\n";
+        }
+
+        if (tests && tests.length > 0) {
+          result += `## 🧪 Test Patterns (${tests.length})\n`;
+          tests.slice(0, 3).forEach((t: { file: string; testType: string; framework?: string }) => {
+            result += `- **${t.file}** [${t.testType}]`;
+            if (t.framework) result += ` (${t.framework})`;
+            result += "\n";
+          });
+        }
+
+        return result;
+      }
+
+      // ============================================
+      // RAG Guidelines Handler
+      // ============================================
+
+      case "get_rag_guidelines": {
+        const { focus = "all", context } = args as {
+          focus?: string;
+          context?: string;
+        };
+
+        let result = `# 📚 RAG Guidelines for ${PROJECT_NAME}\n\n`;
+
+        // Context-specific header
+        if (context) {
+          const contextTips: Record<string, string> = {
+            coding: "🔧 **Mode: Coding** - Focus on implementation patterns and related code",
+            debugging: "🐛 **Mode: Debugging** - Focus on error patterns and similar issues",
+            reviewing: "👀 **Mode: Reviewing** - Focus on patterns, ADRs, and best practices",
+            learning: "📖 **Mode: Learning** - Focus on documentation and explanations",
+            documenting: "📝 **Mode: Documenting** - Focus on existing docs and patterns",
+          };
+          result += `${contextTips[context] || ''}\n\n`;
+        }
+
+        // Search Guidelines
+        if (focus === "all" || focus === "search") {
+          result += `## 🔍 Search Best Practices\n\n`;
+          result += `### Query Formulation\n`;
+          result += `- **Be specific**: "authentication middleware express" > "auth code"\n`;
+          result += `- **Include context**: Add file types, modules, or features\n`;
+          result += `- **Use technical terms**: Match actual code terminology\n`;
+          result += `- **Combine concepts**: "error handling async database"\n\n`;
+
+          result += `### Tool Selection\n`;
+          result += `| Goal | Tool | When |\n`;
+          result += `|------|------|------|\n`;
+          result += `| Find code | \`search_codebase\` | General code search |\n`;
+          result += `| Find similar | \`search_similar\` | Have code snippet |\n`;
+          result += `| Understand | \`ask_codebase\` | Need explanation |\n`;
+          result += `| Find feature | \`find_feature\` | Know what it does |\n`;
+          result += `| Group by file | \`grouped_search\` | Overview needed |\n`;
+          result += `| Exact + semantic | \`hybrid_search\` | Specific terms |\n\n`;
+
+          result += `### Query Improvement\n`;
+          result += `- If results unsatisfactory → \`suggest_better_query\`\n`;
+          result += `- Always provide feedback → \`feedback_search\`\n`;
+          result += `- Check patterns → \`get_quality_metrics\` (see problematic queries)\n\n`;
+        }
+
+        // Memory Guidelines
+        if (focus === "all" || focus === "memory") {
+          result += `## 🧠 Memory Best Practices\n\n`;
+          result += `### What to Remember\n`;
+          result += `| Type | Use For | Example |\n`;
+          result += `|------|---------|----------|\n`;
+          result += `| \`decision\` | Architecture choices | "Use WebSocket for real-time" |\n`;
+          result += `| \`insight\` | Learned patterns | "Service X fails under load" |\n`;
+          result += `| \`context\` | Project knowledge | "Module Y handles payments" |\n`;
+          result += `| \`todo\` | Tasks to track | "Refactor auth after v2" |\n`;
+          result += `| \`note\` | General notes | "Config in .env.local" |\n\n`;
+
+          result += `### Memory Hygiene\n`;
+          result += `- **Tag consistently**: Use project areas as tags\n`;
+          result += `- **Be concise**: 1-3 sentences per memory\n`;
+          result += `- **Update outdated**: Use \`feedback_memory\` with correction\n`;
+          result += `- **Review periodically**: \`review_memories\` for validation\n\n`;
+
+          result += `### Architecture Knowledge\n`;
+          result += `- Record ADRs: \`record_adr\` for major decisions\n`;
+          result += `- Record patterns: \`record_pattern\` for code structures\n`;
+          result += `- Record tech debt: \`record_tech_debt\` for known issues\n`;
+          result += `- Check before coding: \`check_architecture\`\n\n`;
+        }
+
+        // Session Guidelines
+        if (focus === "all" || focus === "session") {
+          result += `## 📋 Session Management\n\n`;
+          result += `### Recommended Workflow\n`;
+          result += `\`\`\`\n`;
+          result += `1. start_session          # Begin with context\n`;
+          result += `2. warm_cache             # Pre-load embeddings\n`;
+          result += `3. ... work ...           # Tools auto-track activity\n`;
+          result += `4. end_session            # Save learnings, get summary\n`;
+          result += `\`\`\`\n\n`;
+
+          result += `### Session Benefits\n`;
+          result += `- **Faster responses**: L1 cache hits (30min TTL)\n`;
+          result += `- **Context tracking**: Files, tools, queries logged\n`;
+          result += `- **Auto-learning**: Insights extracted at end\n`;
+          result += `- **Resume support**: Continue from previous session\n\n`;
+
+          result += `### When to Start New Session\n`;
+          result += `- New task or feature\n`;
+          result += `- Different area of codebase\n`;
+          result += `- After long break (>1 hour)\n\n`;
+        }
+
+        // Feedback Guidelines
+        if (focus === "all" || focus === "feedback") {
+          result += `## 👍 Feedback Guidelines\n\n`;
+          result += `### Search Feedback\n`;
+          result += `| Result Quality | Action |\n`;
+          result += `|----------------|--------|\n`;
+          result += `| Found what needed | \`feedback_search\` → helpful |\n`;
+          result += `| Partially useful | \`feedback_search\` → partially_helpful |\n`;
+          result += `| Not relevant | \`feedback_search\` → not_helpful + better query |\n\n`;
+
+          result += `### Memory Feedback\n`;
+          result += `| Memory State | Action |\n`;
+          result += `|--------------|--------|\n`;
+          result += `| Still correct | \`feedback_memory\` → accurate |\n`;
+          result += `| Info changed | \`feedback_memory\` → outdated + correction |\n`;
+          result += `| Was wrong | \`feedback_memory\` → incorrect + correction |\n\n`;
+
+          result += `### Why Feedback Matters\n`;
+          result += `- System learns from your feedback\n`;
+          result += `- Query suggestions improve\n`;
+          result += `- Problematic patterns detected\n`;
+          result += `- Quality metrics tracked\n\n`;
+        }
+
+        // Performance Guidelines
+        if (focus === "all" || focus === "performance") {
+          result += `## ⚡ Performance Optimization\n\n`;
+          result += `### Cache Strategy\n`;
+          result += `- **Start session**: Enables L1 cache\n`;
+          result += `- **Warm cache**: Pre-load frequent queries\n`;
+          result += `- **Resume sessions**: Copies previous cache\n`;
+          result += `- **Monitor**: \`get_cache_stats\` for hit rates\n\n`;
+
+          result += `### Query Optimization\n`;
+          result += `- Shorter queries = faster embedding\n`;
+          result += `- Specific queries = better results = less retries\n`;
+          result += `- Use filters (language, path) to narrow scope\n\n`;
+
+          result += `### Batch Operations\n`;
+          result += `- \`batch_remember\` for multiple memories\n`;
+          result += `- \`extract_learnings\` with autoSave=true\n`;
+          result += `- Grouped search for file-level overview\n\n`;
+
+          result += `### Expected Performance\n`;
+          result += `| Operation | L1 Hit | L2 Hit | Miss |\n`;
+          result += `|-----------|--------|--------|------|\n`;
+          result += `| Embedding | 1-5ms | 5-15ms | 50-200ms |\n`;
+          result += `| Search | 20-50ms | 50-150ms | 100-500ms |\n`;
+          result += `| Memory recall | 10-30ms | 30-100ms | 100-300ms |\n\n`;
+        }
+
+        // Context-specific recommendations
+        if (context) {
+          result += `## 🎯 Recommendations for ${context.charAt(0).toUpperCase() + context.slice(1)}\n\n`;
+
+          const contextRecs: Record<string, string[]> = {
+            coding: [
+              "Use `suggest_implementation` before writing new code",
+              "Check `suggest_related_code` for dependencies",
+              "Run `check_architecture` to validate patterns",
+              "Use `suggest_tests` for test templates",
+              "Remember decisions with `record_adr`",
+            ],
+            debugging: [
+              "Search for error messages with `hybrid_search`",
+              "Use `ask_codebase` to understand error context",
+              "Check `recall` for similar past issues",
+              "Record solutions as `insight` memories",
+              "Use `search_similar` with error-causing code",
+            ],
+            reviewing: [
+              "Check `get_adrs` for architectural decisions",
+              "Use `get_patterns` for expected structures",
+              "Run `check_architecture` on changes",
+              "Review `get_tech_debt` for known issues",
+              "Use `analyze_project_structure` for overview",
+            ],
+            learning: [
+              "Start with `ask_codebase` for explanations",
+              "Use `explain_code` for complex snippets",
+              "Check `find_feature` to locate functionality",
+              "Use `get_code_context` for comprehensive view",
+              "Remember insights for future reference",
+            ],
+            documenting: [
+              "Use `search_docs` for existing documentation",
+              "Check `get_patterns` for structure templates",
+              "Use `search_confluence` for related docs",
+              "Record new patterns with `record_pattern`",
+              "Use `generate_spec` for feature specs",
+            ],
+          };
+
+          const recs = contextRecs[context] || [];
+          recs.forEach((rec, i) => {
+            result += `${i + 1}. ${rec}\n`;
+          });
+          result += "\n";
+        }
+
+        // Mandatory Workflows
+        result += `## 🚨 MANDATORY Workflows (Always Follow)\n\n`;
+
+        result += `### Rule 1: Always Start with Context\n`;
+        result += `**BEFORE any coding task:**\n`;
+        result += `\`\`\`\n`;
+        result += `1. recall(query="<task topic>")     # Check existing knowledge\n`;
+        result += `2. search_codebase(query="<topic>") # Find related code\n`;
+        result += `3. get_patterns(query="<area>")     # Check established patterns\n`;
+        result += `\`\`\`\n`;
+        result += `❌ NEVER start coding without checking existing context first!\n\n`;
+
+        result += `### Rule 2: Validate Before Implementing\n`;
+        result += `**BEFORE writing new code:**\n`;
+        result += `\`\`\`\n`;
+        result += `1. suggest_architecture(feature="<feature>")  # Get structure guidance\n`;
+        result += `2. suggest_implementation(targetCode="...")   # Find reference patterns\n`;
+        result += `3. get_adrs(query="<related area>")           # Check decisions\n`;
+        result += `\`\`\`\n`;
+        result += `❌ NEVER implement without checking architectural guidelines!\n\n`;
+
+        result += `### Rule 3: Learn from Every Search\n`;
+        result += `**AFTER every search operation:**\n`;
+        result += `\`\`\`\n`;
+        result += `IF results_helpful:\n`;
+        result += `  feedback_search(feedbackType="helpful")\n`;
+        result += `ELSE:\n`;
+        result += `  feedback_search(feedbackType="not_helpful", betterQuery="...")\n`;
+        result += `  suggest_better_query(query="original query")\n`;
+        result += `\`\`\`\n`;
+        result += `❌ NEVER ignore poor search results - always provide feedback!\n\n`;
+
+        result += `### Rule 4: Document Discoveries\n`;
+        result += `**WHEN you learn something new:**\n`;
+        result += `\`\`\`\n`;
+        result += `- Found a pattern      → record_pattern(...)\n`;
+        result += `- Made a decision      → record_adr(...)\n`;
+        result += `- Found tech debt      → record_tech_debt(...)\n`;
+        result += `- Learned insight      → remember(type="insight", ...)\n`;
+        result += `- Found important info → remember(type="context", ...)\n`;
+        result += `\`\`\`\n`;
+        result += `❌ NEVER let important discoveries go unrecorded!\n\n`;
+
+        result += `### Rule 5: Validate Before Committing\n`;
+        result += `**BEFORE finalizing code:**\n`;
+        result += `\`\`\`\n`;
+        result += `1. check_architecture(code="<new code>")  # Validate patterns\n`;
+        result += `2. suggest_tests(code="<new code>")       # Get test patterns\n`;
+        result += `3. check_db_schema(change="...")          # If DB changes\n`;
+        result += `\`\`\`\n`;
+        result += `❌ NEVER commit without architectural validation!\n\n`;
+
+        result += `## 📋 Mandatory Tool Sequences\n\n`;
+
+        result += `### Sequence: New Feature Implementation\n`;
+        result += `\`\`\`\n`;
+        result += `┌─────────────────────────────────────────────────────────┐\n`;
+        result += `│ 1. UNDERSTAND                                           │\n`;
+        result += `│    recall("feature area")                               │\n`;
+        result += `│    search_codebase("similar features")                  │\n`;
+        result += `│    ask_codebase("how does X work")                      │\n`;
+        result += `├─────────────────────────────────────────────────────────┤\n`;
+        result += `│ 2. PLAN                                                 │\n`;
+        result += `│    suggest_architecture(feature="...", type="...")      │\n`;
+        result += `│    get_adrs(query="related decisions")                  │\n`;
+        result += `│    get_patterns(query="structure")                      │\n`;
+        result += `├─────────────────────────────────────────────────────────┤\n`;
+        result += `│ 3. IMPLEMENT                                            │\n`;
+        result += `│    suggest_implementation(targetCode="...")             │\n`;
+        result += `│    suggest_related_code(description="...")              │\n`;
+        result += `│    [write code following patterns]                      │\n`;
+        result += `├─────────────────────────────────────────────────────────┤\n`;
+        result += `│ 4. VALIDATE                                             │\n`;
+        result += `│    check_architecture(code="...")                       │\n`;
+        result += `│    suggest_tests(code="...")                            │\n`;
+        result += `├─────────────────────────────────────────────────────────┤\n`;
+        result += `│ 5. DOCUMENT                                             │\n`;
+        result += `│    record_adr(...) if architectural decision            │\n`;
+        result += `│    record_pattern(...) if new pattern                   │\n`;
+        result += `│    remember(...) key insights                           │\n`;
+        result += `└─────────────────────────────────────────────────────────┘\n`;
+        result += `\`\`\`\n\n`;
+
+        result += `### Sequence: Bug Investigation\n`;
+        result += `\`\`\`\n`;
+        result += `┌─────────────────────────────────────────────────────────┐\n`;
+        result += `│ 1. SEARCH CONTEXT                                       │\n`;
+        result += `│    recall("error type or area")                         │\n`;
+        result += `│    hybrid_search("error message keywords")              │\n`;
+        result += `│    search_similar(code="problematic code")              │\n`;
+        result += `├─────────────────────────────────────────────────────────┤\n`;
+        result += `│ 2. UNDERSTAND                                           │\n`;
+        result += `│    ask_codebase("why does X happen")                    │\n`;
+        result += `│    get_code_context(code="affected code")               │\n`;
+        result += `│    explain_code(code="complex parts")                   │\n`;
+        result += `├─────────────────────────────────────────────────────────┤\n`;
+        result += `│ 3. FIX                                                  │\n`;
+        result += `│    suggest_implementation(targetCode="fix")             │\n`;
+        result += `│    [implement fix]                                      │\n`;
+        result += `├─────────────────────────────────────────────────────────┤\n`;
+        result += `│ 4. LEARN                                                │\n`;
+        result += `│    remember(type="insight", content="root cause...")    │\n`;
+        result += `│    record_tech_debt(...) if systemic issue              │\n`;
+        result += `│    feedback_search(...) on helpful results              │\n`;
+        result += `└─────────────────────────────────────────────────────────┘\n`;
+        result += `\`\`\`\n\n`;
+
+        result += `### Sequence: Code Review\n`;
+        result += `\`\`\`\n`;
+        result += `┌─────────────────────────────────────────────────────────┐\n`;
+        result += `│ 1. LOAD CONTEXT                                         │\n`;
+        result += `│    get_patterns(query="code area")                      │\n`;
+        result += `│    get_adrs(query="related decisions")                  │\n`;
+        result += `│    get_tech_debt(impact="all")                          │\n`;
+        result += `├─────────────────────────────────────────────────────────┤\n`;
+        result += `│ 2. ANALYZE                                              │\n`;
+        result += `│    check_architecture(code="code to review")            │\n`;
+        result += `│    suggest_related_code(code="...")                     │\n`;
+        result += `│    analyze_project_structure(path="affected area")      │\n`;
+        result += `├─────────────────────────────────────────────────────────┤\n`;
+        result += `│ 3. DOCUMENT FINDINGS                                    │\n`;
+        result += `│    record_tech_debt(...) for issues found               │\n`;
+        result += `│    remember(type="insight") for observations            │\n`;
+        result += `└─────────────────────────────────────────────────────────┘\n`;
+        result += `\`\`\`\n\n`;
+
+        result += `### Sequence: Learning New Area\n`;
+        result += `\`\`\`\n`;
+        result += `┌─────────────────────────────────────────────────────────┐\n`;
+        result += `│ 1. OVERVIEW                                             │\n`;
+        result += `│    ask_codebase("what is X and how does it work")       │\n`;
+        result += `│    find_feature(description="X functionality")          │\n`;
+        result += `│    grouped_search(query="X", groupBy="file")            │\n`;
+        result += `├─────────────────────────────────────────────────────────┤\n`;
+        result += `│ 2. DEEP DIVE                                            │\n`;
+        result += `│    get_code_context(code="main implementation")         │\n`;
+        result += `│    explain_code(code="complex parts")                   │\n`;
+        result += `│    search_docs(query="X documentation")                 │\n`;
+        result += `├─────────────────────────────────────────────────────────┤\n`;
+        result += `│ 3. CAPTURE KNOWLEDGE                                    │\n`;
+        result += `│    remember(type="context", content="how X works...")   │\n`;
+        result += `│    remember(type="insight", content="key patterns...")  │\n`;
+        result += `│    feedback_search(...) on all searches                 │\n`;
+        result += `└─────────────────────────────────────────────────────────┘\n`;
+        result += `\`\`\`\n\n`;
+
+        result += `## ⚠️ Anti-Patterns to Avoid\n\n`;
+        result += `| ❌ Don't | ✅ Do Instead |\n`;
+        result += `|----------|---------------|\n`;
+        result += `| Start coding immediately | \`recall\` + \`search_codebase\` first |\n`;
+        result += `| Ignore search results | Always \`feedback_search\` |\n`;
+        result += `| Reinvent patterns | Check \`get_patterns\` + \`suggest_implementation\` |\n`;
+        result += `| Forget discoveries | \`remember\` or \`record_*\` everything important |\n`;
+        result += `| Skip validation | Always \`check_architecture\` before commit |\n`;
+        result += `| Write tests blindly | Use \`suggest_tests\` for patterns |\n`;
+        result += `| Repeat same queries | Use \`suggest_better_query\` to improve |\n`;
+        result += `| Work without session | \`start_session\` for caching benefits |\n\n`;
+
+        result += `## 🔄 Continuous Improvement Cycle\n\n`;
+        result += `\`\`\`\n`;
+        result += `    ┌──────────────┐\n`;
+        result += `    │    SEARCH    │\n`;
+        result += `    └──────┬───────┘\n`;
+        result += `           │\n`;
+        result += `           ▼\n`;
+        result += `    ┌──────────────┐     ┌──────────────┐\n`;
+        result += `    │   FEEDBACK   │────▶│    LEARN     │\n`;
+        result += `    └──────────────┘     └──────┬───────┘\n`;
+        result += `           ▲                    │\n`;
+        result += `           │                    ▼\n`;
+        result += `    ┌──────────────┐     ┌──────────────┐\n`;
+        result += `    │    APPLY     │◀────│   REMEMBER   │\n`;
+        result += `    └──────────────┘     └──────────────┘\n`;
+        result += `\`\`\`\n`;
+        result += `Every interaction should contribute to system improvement!\n\n`;
+
+        // Quick reference
+        result += `## 📌 Quick Reference\n\n`;
+        result += `### Most Used Tools\n`;
+        result += `- \`search_codebase\` - Find code\n`;
+        result += `- \`ask_codebase\` - Get explanations\n`;
+        result += `- \`remember\` - Save knowledge\n`;
+        result += `- \`recall\` - Retrieve knowledge\n`;
+        result += `- \`suggest_better_query\` - Improve searches\n\n`;
+
+        result += `### Workflow Shortcuts\n`;
+        result += `- New feature: \`suggest_architecture\` → code → \`check_architecture\`\n`;
+        result += `- Bug fix: \`search_codebase\` → fix → \`record_tech_debt\` (if needed)\n`;
+        result += `- Learning: \`ask_codebase\` → \`explain_code\` → \`remember\` insights\n`;
+
+        return result;
+      }
+
+      // ============================================
+      // Cache Management Handlers
+      // ============================================
+
+      case "get_cache_stats": {
+        const { sessionId } = args as {
+          sessionId?: string;
+        };
+
+        if (sessionId) {
+          // Get session-specific stats
+          const response = await api.get(`/api/cache/session/${sessionId}`);
+          const stats = response.data;
+
+          let result = `# 📊 Cache Stats for Session\n\n`;
+          result += `**Session ID**: ${sessionId}\n\n`;
+          result += `## Hit Rates\n`;
+          result += `- **Total Hits**: ${stats.hits}\n`;
+          result += `- **Misses**: ${stats.misses}\n`;
+          result += `- **Hit Rate**: ${(stats.hitRate * 100).toFixed(1)}%\n\n`;
+
+          result += `## Cache Level Distribution\n`;
+          result += `- **L1 (Session)**: ${stats.l1Hits} hits\n`;
+          result += `- **L2 (Project)**: ${stats.l2Hits} hits\n`;
+          result += `- **L3 (Global)**: ${stats.l3Hits} hits\n`;
+
+          return result;
+        }
+
+        // Get global cache analytics
+        const response = await api.get('/api/cache/analytics');
+        const analytics = response.data;
+
+        let result = `# 📊 Global Cache Analytics\n\n`;
+        result += `**Status**: ${analytics.enabled ? (analytics.connected ? '🟢 Connected' : '🟡 Disconnected') : '🔴 Disabled'}\n\n`;
+
+        if (analytics.connected) {
+          result += `## Keys\n`;
+          result += `- **Total**: ${analytics.totalKeys?.toLocaleString() || 'N/A'}\n`;
+          result += `- **Embeddings**: ${analytics.embeddingKeys?.toLocaleString() || 'N/A'}\n`;
+          result += `- **Search**: ${analytics.searchKeys?.toLocaleString() || 'N/A'}\n`;
+          result += `- **Sessions**: ${analytics.sessionKeys?.toLocaleString() || 'N/A'}\n\n`;
+          result += `## Memory\n`;
+          result += `- **Used**: ${analytics.memoryUsage || 'N/A'}\n`;
+        }
+
+        return result;
+      }
+
+      case "warm_cache": {
+        const { sessionId, previousSessionId, recentQueries } = args as {
+          sessionId: string;
+          previousSessionId?: string;
+          recentQueries?: string[];
+        };
+
+        const response = await api.post('/api/cache/warm', {
+          sessionId,
+          previousSessionId,
+          recentQueries,
+        });
+
+        const { warmedCount } = response.data;
+
+        let result = `🔥 **Cache Warmed**\n\n`;
+        result += `- **Session ID**: ${sessionId}\n`;
+        result += `- **Pre-loaded**: ${warmedCount} embeddings\n`;
+        if (previousSessionId) {
+          result += `- **Resumed from**: ${previousSessionId}\n`;
+        }
+        if (recentQueries && recentQueries.length > 0) {
+          result += `- **Queries warmed**: ${recentQueries.length}\n`;
+        }
+        result += `\nThe session cache is now primed for faster responses!`;
 
         return result;
       }
