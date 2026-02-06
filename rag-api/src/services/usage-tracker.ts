@@ -97,6 +97,7 @@ class UsageTrackerService {
         vector: embedding,
         payload: {
           ...usage,
+          timestampMs: Date.now(),
           hour: new Date().getHours(),
           dayOfWeek: new Date().getDay(),
         },
@@ -117,8 +118,7 @@ class UsageTrackerService {
    */
   async getStats(projectName: string, days: number = 7): Promise<UsageStats> {
     const collectionName = this.getCollectionName(projectName);
-    const cutoffDate = new Date();
-    cutoffDate.setDate(cutoffDate.getDate() - days);
+    const cutoffMs = Date.now() - days * 86400000;
 
     try {
       // Get all usage records (limited to recent)
@@ -133,8 +133,8 @@ class UsageTrackerService {
           with_vector: false,
           filter: {
             must: [{
-              key: 'timestamp',
-              range: { gte: cutoffDate.toISOString() },
+              key: 'timestampMs',
+              range: { gte: cutoffMs },
             }],
           },
         });
@@ -236,8 +236,7 @@ class UsageTrackerService {
   }> {
     const { days = 7, sessionId } = options;
     const collectionName = this.getCollectionName(projectName);
-    const cutoffDate = new Date();
-    cutoffDate.setDate(cutoffDate.getDate() - days);
+    const cutoffMs = Date.now() - days * 86400000;
 
     const result = {
       peakHours: [] as Array<{ hour: number; count: number }>,
@@ -251,7 +250,7 @@ class UsageTrackerService {
       const usages: ToolUsage[] = [];
       let offset: string | number | undefined = undefined;
       const mustConditions: Record<string, unknown>[] = [
-        { key: 'timestamp', range: { gte: cutoffDate.toISOString() } },
+        { key: 'timestampMs', range: { gte: cutoffMs } },
       ];
       if (sessionId) {
         mustConditions.push({ key: 'sessionId', match: { value: sessionId } });
