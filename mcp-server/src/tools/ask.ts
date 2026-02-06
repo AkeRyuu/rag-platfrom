@@ -280,12 +280,16 @@ export function createAskTools(projectName: string): ToolModule {
       }
 
       // Save with the classified type
-      const rememberResponse = await ctx.api.post("/api/remember", {
+      const rememberResponse = await ctx.api.post("/api/memory", {
         projectName: ctx.projectName,
         type: memoryType,
         content,
         relatedTo,
         tags: tags || (analysis.learnings?.[0]?.tags),
+        metadata: {
+          source: 'auto_pattern',
+          confidence,
+        },
       });
       const saved = rememberResponse.data;
 

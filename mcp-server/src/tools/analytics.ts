@@ -89,6 +89,14 @@ export function createAnalyticsTools(projectName: string): ToolModule {
       },
     },
     {
+      name: "get_platform_stats",
+      description: `Get cross-project platform statistics. Shows all projects, their collections, and aggregated metrics.`,
+      inputSchema: {
+        type: "object" as const,
+        properties: {},
+      },
+    },
+    {
       name: "get_prediction_stats",
       description: `Get predictive loader stats for ${projectName}. Shows prediction accuracy, hit rates, and strategy breakdown.`,
       inputSchema: {
@@ -237,6 +245,27 @@ export function createAnalyticsTools(projectName: string): ToolModule {
         result += `- **${s.name}** - ${sizeMB} MB`;
         if (s.createdAt) result += ` (${new Date(s.createdAt).toLocaleString()})`;
         result += "\n";
+      }
+
+      return result;
+    },
+
+    get_platform_stats: async (
+      _args: Record<string, unknown>,
+      ctx: ToolContext
+    ): Promise<string> => {
+      const response = await ctx.api.get("/api/platform/stats");
+      const data = response.data;
+
+      let result = `## Platform Statistics\n\n`;
+      result += `- **Total Projects:** ${data.totalProjects ?? 0}\n`;
+      result += `- **Total Collections:** ${data.totalCollections ?? 0}\n\n`;
+
+      if (data.projects && data.projects.length > 0) {
+        result += `### Projects\n`;
+        for (const p of data.projects) {
+          result += `- **${p.project}**: ${p.collections} collections, ${p.totalVectors} vectors\n`;
+        }
       }
 
       return result;

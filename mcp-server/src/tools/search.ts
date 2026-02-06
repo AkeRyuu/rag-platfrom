@@ -140,6 +140,30 @@ export function createSearchTools(projectName: string): ToolModule {
         properties: {},
       },
     },
+    {
+      name: "search_graph",
+      description: `Search ${projectName} codebase with graph expansion. Finds semantically similar code plus connected files via import/call relationships.`,
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          query: {
+            type: "string",
+            description: "Search query",
+          },
+          limit: {
+            type: "number",
+            description: "Max direct results (default: 5)",
+            default: 5,
+          },
+          expandHops: {
+            type: "number",
+            description: "Number of graph hops to expand (default: 1)",
+            default: 1,
+          },
+        },
+        required: ["query"],
+      },
+    },
   ];
 
   const handlers: Record<string, ToolHandler> = {
@@ -274,6 +298,60 @@ export function createSearchTools(projectName: string): ToolModule {
             truncate(r.content, 500)
         )
         .join("\n\n---\n\n");
+    },
+
+    search_graph: async (
+      args: Record<string, unknown>,
+      ctx: ToolContext
+    ): Promise<string> => {
+      const { query, limit = 5, expandHops = 1 } = args as {
+        query: string;
+        limit?: number;
+        expandHops?: number;
+      };
+      const response = await ctx.api.post("/api/search-graph", {
+        collection: `${ctx.collectionPrefix}codebase`,
+        query,
+        limit,
+        expandHops,
+      });
+      const { results, graphExpanded, expandedFiles } = response.data;
+
+      let output = "";
+
+      if (results && results.length > 0) {
+        output += "**Direct matches:**\n\n";
+        output += results
+          .map(
+            (r: any) =>
+              `**${r.file}** (score: ${pct(r.score)})\n` +
+              "```" + (r.language || "") + "\n" +
+              truncate(r.content, 300) + "\n```"
+          )
+          .join("\n\n");
+      }
+
+      if (graphExpanded && graphExpanded.length > 0) {
+        output += "\n\n---\n\n**Graph-connected files:**\n\n";
+        output += graphExpanded
+          .map(
+            (r: any) =>
+              `**${r.file}** (score: ${pct(r.score)})\n` +
+              "```" + (r.language || "") + "\n" +
+              truncate(r.content, 300) + "\n```"
+          )
+          .join("\n\n");
+      }
+
+      if (!output) {
+        return "No results found.";
+      }
+
+      if (expandedFiles && expandedFiles.length > 0) {
+        output += `\n\n_Graph expanded to ${expandedFiles.length} additional files._`;
+      }
+
+      return output;
     },
 
     get_project_stats: async (

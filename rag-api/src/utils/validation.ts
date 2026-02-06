@@ -116,6 +116,16 @@ export const recallMemorySchema = z.object({
   tag: z.string().max(50).optional(),
 });
 
+export const promoteMemorySchema = z.object({
+  projectName: projectNameSchema.optional(),
+  memoryId: z.string().min(1),
+  reason: z.enum(['human_validated', 'pr_merged', 'tests_passed']),
+  evidence: z.string().max(2000).optional(),
+  runGates: z.boolean().default(false),
+  projectPath: z.string().optional(),
+  affectedFiles: z.array(z.string()).optional(),
+});
+
 export const listMemorySchema = z.object({
   projectName: projectNameSchema.optional(),
   type: z.union([memoryTypeSchema, z.literal('all')]).optional(),
@@ -353,6 +363,37 @@ export const behaviorPatternsSchema = z.object({
   days: z.number().int().min(1).max(90).default(7),
   sessionId: z.string().optional(),
 });
+
+// ============================================
+// Agent Schemas
+// ============================================
+
+export const runAgentSchema = z.object({
+  projectName: projectNameSchema.optional(),
+  agentType: z.enum(['research', 'review', 'documentation', 'refactor', 'test']),
+  task: z.string().min(1).max(10000),
+  context: z.string().max(50000).optional(),
+  maxIterations: z.number().int().min(1).max(20).optional(),
+  timeout: z.number().int().min(5000).max(300000).optional(),
+});
+
+export type RunAgentInput = z.infer<typeof runAgentSchema>;
+
+// ============================================
+// Context Pack Schemas
+// ============================================
+
+export const contextPackSchema = z.object({
+  projectName: projectNameSchema,
+  query: z.string().min(1).max(10000),
+  maxTokens: z.number().int().min(500).max(32000).default(8000),
+  semanticWeight: z.number().min(0).max(1).default(0.7),
+  includeADRs: z.boolean().default(true),
+  includeTests: z.boolean().default(false),
+  graphExpand: z.boolean().default(true),
+});
+
+export type ContextPackInput = z.infer<typeof contextPackSchema>;
 
 // Type exports for use in routes
 export type SearchInput = z.infer<typeof searchSchema>;

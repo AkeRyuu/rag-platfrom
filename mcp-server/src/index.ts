@@ -20,6 +20,7 @@ import {
 
 import { createApiClient } from "./api-client.js";
 import { ToolRegistry } from "./tool-registry.js";
+import { ContextEnricher } from "./context-enrichment.js";
 import type { ToolContext } from "./types.js";
 
 // Tool modules
@@ -40,6 +41,7 @@ import { createSuggestionTools } from "./tools/suggestions.js";
 import { createCacheTools } from "./tools/cache.js";
 import { createGuidelinesTools } from "./tools/guidelines.js";
 import { createAdvancedTools } from "./tools/advanced.js";
+import { createAgentTools } from "./tools/agents.js";
 
 // Configuration from environment
 const PROJECT_NAME = process.env.PROJECT_NAME || "default";
@@ -50,12 +52,13 @@ const COLLECTION_PREFIX = `${PROJECT_NAME}_`;
 // API client
 const api = createApiClient(RAG_API_URL, PROJECT_NAME, PROJECT_PATH);
 
-// Tool context shared by all handlers
+// Mutable tool context shared by all handlers (session state updates in-place)
 const ctx: ToolContext = {
   api,
   projectName: PROJECT_NAME,
   projectPath: PROJECT_PATH,
   collectionPrefix: COLLECTION_PREFIX,
+  enrichmentEnabled: true,
 };
 
 // Build tool registry from modules
@@ -72,12 +75,21 @@ registry.register(createPmTools(PROJECT_NAME));
 registry.register(createReviewTools(PROJECT_NAME));
 registry.register(createAnalyticsTools(PROJECT_NAME));
 registry.register(createClusteringTools(PROJECT_NAME));
-registry.register(createSessionTools(PROJECT_NAME));
+registry.register(createSessionTools(PROJECT_NAME, ctx));
 registry.register(createFeedbackTools(PROJECT_NAME));
 registry.register(createSuggestionTools(PROJECT_NAME));
 registry.register(createCacheTools(PROJECT_NAME));
 registry.register(createGuidelinesTools(PROJECT_NAME));
 registry.register(createAdvancedTools(PROJECT_NAME));
+registry.register(createAgentTools(PROJECT_NAME));
+
+// Initialize context enrichment middleware
+const enricher = new ContextEnricher({
+  maxAutoRecall: 3,
+  minRelevance: 0.6,
+  timeoutMs: 2000,
+});
+registry.setEnricher(enricher);
 
 // MCP Server
 const server = new Server(
@@ -111,7 +123,7 @@ async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
   console.error(`${PROJECT_NAME} RAG MCP server running (collection prefix: ${COLLECTION_PREFIX})`);
-  console.error(`Registered ${registry.getTools().length} tools from 17 modules`);
+  console.error(`Registered ${registry.getTools().length} tools from 18 modules`);
 }
 
 main().catch(console.error);

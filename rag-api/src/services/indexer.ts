@@ -9,6 +9,11 @@ import { vectorStore, VectorPoint } from './vector-store';
 import { embeddingService } from './embedding';
 import { cacheService } from './cache';
 import { logger } from '../utils/logger';
+import { parserRegistry, ParsedChunk } from './parsers/index';
+import config from '../config';
+import { indexingChunksByType } from '../utils/metrics';
+import { astParser } from './parsers/ast-parser';
+import { graphStore } from './graph-store';
 
 export interface IndexOptions {
   projectName: string;
@@ -328,6 +333,11 @@ export async function indexProject(options: IndexOptions): Promise<IndexStats> {
         chunkIndex: number;
         totalChunks: number;
         hash: string;
+        startLine?: number;
+        endLine?: number;
+        symbols?: string[];
+        imports?: string[];
+        chunkType?: string;
       }
       const allChunks: ChunkInfo[] = [];
       const processedFiles: string[] = [];
@@ -346,19 +356,44 @@ export async function indexProject(options: IndexOptions): Promise<IndexStats> {
             });
           }
 
-          // Chunk the content
-          const chunks = chunkCode(content);
-          const validChunks = chunks.filter(c => c.trim().length >= 10);
+          // Use parser registry for structured chunking
+          const parser = parserRegistry.getParser(filePath);
+          let parsedChunks: ParsedChunk[];
+
+          if (parser) {
+            parsedChunks = parser.parse(content, filePath);
+          } else {
+            // Fallback to existing chunkCode for unknown files
+            const rawChunks = chunkCode(content);
+            parsedChunks = rawChunks.filter(c => c.trim().length >= 10).map((c, idx) => ({
+              content: c,
+              startLine: 0,
+              endLine: 0,
+              language,
+              type: 'code' as const,
+            }));
+          }
+
+          const validChunks = parsedChunks.filter(c => c.content.trim().length >= 10);
+          const fileType = parserRegistry.classifyFile(filePath);
 
           for (let chunkIndex = 0; chunkIndex < validChunks.length; chunkIndex++) {
+            const pc = validChunks[chunkIndex];
             allChunks.push({
-              text: validChunks[chunkIndex],
+              text: pc.content,
               relativePath,
-              language,
+              language: pc.language || language,
               chunkIndex,
               totalChunks: validChunks.length,
               hash,
+              startLine: pc.startLine,
+              endLine: pc.endLine,
+              symbols: pc.symbols,
+              imports: pc.imports,
+              chunkType: fileType,
             });
+
+            indexingChunksByType.inc({ project: projectName, chunk_type: fileType });
           }
 
           // Update hash index
@@ -369,6 +404,17 @@ export async function indexProject(options: IndexOptions): Promise<IndexStats> {
           };
 
           processedFiles.push(relativePath);
+
+          // Extract and index graph edges
+          try {
+            const edges = astParser.extractEdges(content, relativePath);
+            if (edges.length > 0) {
+              await graphStore.indexFileEdges(projectName, relativePath, edges);
+            }
+          } catch (edgeError: any) {
+            logger.debug(`Edge extraction failed for ${relativePath}`, { error: edgeError.message });
+          }
+
           stats.indexedFiles++;
         } catch (error) {
           logger.warn(`Failed to read file: ${filePath}`, { error });
@@ -402,6 +448,11 @@ export async function indexProject(options: IndexOptions): Promise<IndexStats> {
                   project: projectName,
                   indexedAt: new Date().toISOString(),
                   fileHash: chunk.hash,
+                  startLine: chunk.startLine,
+                  endLine: chunk.endLine,
+                  symbols: chunk.symbols,
+                  imports: chunk.imports,
+                  chunkType: chunk.chunkType,
                 },
               });
               stats.totalChunks++;
@@ -423,6 +474,11 @@ export async function indexProject(options: IndexOptions): Promise<IndexStats> {
                     project: projectName,
                     indexedAt: new Date().toISOString(),
                     fileHash: chunk.hash,
+                    startLine: chunk.startLine,
+                    endLine: chunk.endLine,
+                    symbols: chunk.symbols,
+                    imports: chunk.imports,
+                    chunkType: chunk.chunkType,
                   },
                 });
                 stats.totalChunks++;
@@ -596,6 +652,9 @@ export async function reindexWithZeroDowntime(options: ReindexOptions): Promise<
         totalChunks: number;
         startLine: number;
         endLine: number;
+        symbols?: string[];
+        imports?: string[];
+        chunkType?: string;
       }
       const allChunks: ChunkInfo[] = [];
 
@@ -605,25 +664,59 @@ export async function reindexWithZeroDowntime(options: ReindexOptions): Promise<
           const relativePath = path.relative(projectPath, filePath);
           const language = getLanguage(filePath);
 
-          const chunks = chunkCode(content);
-          const validChunks = chunks.filter(c => c.trim().length >= 10);
+          // Use parser registry for structured chunking
+          const parser = parserRegistry.getParser(filePath);
+          let parsedChunks: ParsedChunk[];
 
-          let lineOffset = 0;
+          if (parser) {
+            parsedChunks = parser.parse(content, filePath);
+          } else {
+            // Fallback to existing chunkCode for unknown files
+            const rawChunks = chunkCode(content);
+            let lineOffset = 0;
+            parsedChunks = rawChunks.filter(c => c.trim().length >= 10).map((c) => {
+              const lineCount = c.split('\n').length;
+              const chunk: ParsedChunk = {
+                content: c,
+                startLine: lineOffset + 1,
+                endLine: lineOffset + lineCount,
+                language,
+                type: 'code' as const,
+              };
+              lineOffset += lineCount;
+              return chunk;
+            });
+          }
+
+          const validChunks = parsedChunks.filter(c => c.content.trim().length >= 10);
+          const fileType = parserRegistry.classifyFile(filePath);
+
           for (let chunkIndex = 0; chunkIndex < validChunks.length; chunkIndex++) {
-            const chunkContent = validChunks[chunkIndex];
-            const lineCount = chunkContent.split('\n').length;
-
+            const pc = validChunks[chunkIndex];
             allChunks.push({
-              text: chunkContent,
+              text: pc.content,
               relativePath,
-              language,
+              language: pc.language || language,
               chunkIndex,
               totalChunks: validChunks.length,
-              startLine: lineOffset + 1,
-              endLine: lineOffset + lineCount,
+              startLine: pc.startLine,
+              endLine: pc.endLine,
+              symbols: pc.symbols,
+              imports: pc.imports,
+              chunkType: fileType,
             });
 
-            lineOffset += lineCount;
+            indexingChunksByType.inc({ project: projectName, chunk_type: fileType });
+          }
+
+          // Extract and index graph edges
+          try {
+            const edges = astParser.extractEdges(content, relativePath);
+            if (edges.length > 0) {
+              await graphStore.indexFileEdges(projectName, relativePath, edges);
+            }
+          } catch (edgeError: any) {
+            logger.debug(`Edge extraction failed for ${relativePath}`, { error: edgeError.message });
           }
 
           stats.indexedFiles++;
@@ -658,6 +751,9 @@ export async function reindexWithZeroDowntime(options: ReindexOptions): Promise<
                   endLine: chunk.endLine,
                   project: projectName,
                   indexedAt: new Date().toISOString(),
+                  symbols: chunk.symbols,
+                  imports: chunk.imports,
+                  chunkType: chunk.chunkType,
                 },
               });
               stats.totalChunks++;

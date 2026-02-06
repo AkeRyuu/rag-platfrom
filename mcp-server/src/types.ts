@@ -24,6 +24,8 @@ export interface ToolContext {
   projectName: string;
   projectPath: string;
   collectionPrefix: string;
+  activeSessionId?: string;
+  enrichmentEnabled: boolean;
 }
 
 /** A tool handler function */

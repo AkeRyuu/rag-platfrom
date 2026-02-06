@@ -218,4 +218,110 @@ router.post('/predictions/track', validateProjectName, validate(trackPredictionS
   res.json({ success: true });
 }));
 
+// ============================================
+// Enrichment Tracking (from MCP server)
+// ============================================
+
+/**
+ * Track a context enrichment event
+ * POST /api/track-enrichment
+ */
+router.post('/track-enrichment', asyncHandler(async (req: Request, res: Response) => {
+  const { projectName, tool, result, recallCount, durationMs } = req.body;
+
+  // Import metrics lazily to avoid circular deps
+  const metrics = await import('../utils/metrics');
+  if (projectName && tool) {
+    metrics.enrichmentTotal.inc({ project: projectName, tool, result: result || 'unknown' });
+  }
+  if (projectName && durationMs) {
+    metrics.enrichmentDuration.observe({ project: projectName }, durationMs / 1000);
+  }
+  if (projectName && recallCount !== undefined) {
+    metrics.enrichmentRecallCount.observe({ project: projectName }, recallCount);
+  }
+
+  res.json({ tracked: true });
+}));
+
+// ============================================
+// Platform Analytics (cross-project)
+// ============================================
+
+/**
+ * Get aggregated platform stats across all projects
+ * GET /api/platform/stats
+ */
+router.get('/platform/stats', asyncHandler(async (req: Request, res: Response) => {
+  const { vectorStore } = await import('../services/vector-store');
+  const collections = await vectorStore.listCollections();
+
+  // Group collections by project
+  const projects = new Map<string, string[]>();
+  for (const col of collections) {
+    const parts = col.split('_');
+    if (parts.length >= 2) {
+      const project = parts[0];
+      if (!projects.has(project)) projects.set(project, []);
+      projects.get(project)!.push(col);
+    }
+  }
+
+  const projectStats = [];
+  for (const [project, cols] of projects) {
+    let totalVectors = 0;
+    for (const col of cols) {
+      try {
+        const info = await vectorStore.getCollectionInfo(col);
+        totalVectors += info.vectorsCount;
+      } catch {
+        // Skip inaccessible collections
+      }
+    }
+    projectStats.push({
+      project,
+      collections: cols.length,
+      totalVectors,
+    });
+  }
+
+  res.json({
+    totalProjects: projects.size,
+    totalCollections: collections.length,
+    projects: projectStats,
+  });
+}));
+
+/**
+ * Get agent statistics across all projects
+ * GET /api/platform/agent-stats
+ */
+router.get('/platform/agent-stats', asyncHandler(async (req: Request, res: Response) => {
+  const metrics = await import('../utils/metrics');
+  const agentMetrics = await metrics.registry.getSingleMetricAsString('agent_runs_total');
+  const durationMetrics = await metrics.registry.getSingleMetricAsString('agent_duration_seconds');
+
+  res.json({
+    message: 'Agent statistics available via /metrics endpoint (Prometheus format)',
+    agentRuns: agentMetrics,
+    agentDuration: durationMetrics,
+  });
+}));
+
+/**
+ * Get enrichment statistics across all projects
+ * GET /api/platform/enrichment-stats
+ */
+router.get('/platform/enrichment-stats', asyncHandler(async (req: Request, res: Response) => {
+  const metrics = await import('../utils/metrics');
+  const enrichmentMetrics = await metrics.registry.getSingleMetricAsString('enrichment_total');
+  const durationMetrics = await metrics.registry.getSingleMetricAsString('enrichment_duration_seconds');
+
+  res.json({
+    message: 'Enrichment statistics available via /metrics endpoint (Prometheus format)',
+    enrichmentTotal: enrichmentMetrics,
+    enrichmentDuration: durationMetrics,
+  });
+}));
+
 export default router;

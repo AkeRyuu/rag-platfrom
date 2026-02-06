@@ -6,6 +6,7 @@ import { Router, Request, Response } from 'express';
 import { vectorStore } from '../services/vector-store';
 import { embeddingService } from '../services/embedding';
 import { llm } from '../services/llm';
+import { contextPackBuilder } from '../services/context-pack';
 import { asyncHandler } from '../middleware/async-handler';
 import { validate } from '../utils/validation';
 import {
@@ -16,8 +17,10 @@ import {
   askSchema,
   explainSchema,
   findFeatureSchema,
+  contextPackSchema,
 } from '../utils/validation';
 import { buildSearchFilter } from '../utils/filters';
+import { graphStore } from '../services/graph-store';
 
 const router = Router();
 
@@ -298,6 +301,85 @@ router.post('/find-feature', validate(findFeatureSchema), asyncHandler(async (re
   );
 
   res.json({ explanation: result.text, mainFiles, relatedFiles });
+}));
+
+/**
+ * Search with graph expansion
+ * POST /api/search-graph
+ */
+router.post('/search-graph', asyncHandler(async (req: Request, res: Response) => {
+  const { collection, query, limit = 10, expandHops = 1 } = req.body;
+
+  if (!collection || !query) {
+    return res.status(400).json({ error: 'collection and query are required' });
+  }
+
+  const projectName = collection.replace(/_codebase$|_code$/, '');
+
+  // 1. Semantic search
+  const queryEmbedding = await embeddingService.embed(query);
+  const semanticResults = await vectorStore.search(collection, queryEmbedding, limit);
+
+  // 2. Get files from results
+  const seedFiles = [...new Set(semanticResults.map(r => r.payload.file as string).filter(Boolean))];
+
+  // 3. Graph expand
+  let expandedFiles: string[] = [];
+  if (seedFiles.length > 0 && expandHops > 0) {
+    expandedFiles = await graphStore.expand(projectName, seedFiles, expandHops);
+    // Remove seed files from expanded
+    expandedFiles = expandedFiles.filter(f => !seedFiles.includes(f));
+  }
+
+  // 4. Get graph-expanded results
+  let graphResults: typeof semanticResults = [];
+  if (expandedFiles.length > 0) {
+    // Search for each expanded file
+    for (const file of expandedFiles.slice(0, 10)) {
+      const fileResults = await vectorStore.search(collection, queryEmbedding, 2, {
+        must: [{ key: 'file', match: { value: file } }],
+      });
+      graphResults.push(...fileResults);
+    }
+  }
+
+  res.json({
+    results: semanticResults.map(r => ({
+      file: r.payload.file,
+      content: r.payload.content,
+      language: r.payload.language,
+      score: r.score,
+      source: 'semantic',
+    })),
+    graphExpanded: graphResults.map(r => ({
+      file: r.payload.file,
+      content: r.payload.content,
+      language: r.payload.language,
+      score: r.score,
+      source: 'graph',
+    })),
+    expandedFiles,
+  });
+}));
+
+/**
+ * Build a context pack with faceted retrieval and reranking
+ * POST /api/context-pack
+ */
+router.post('/context-pack', validate(contextPackSchema), asyncHandler(async (req: Request, res: Response) => {
+  const { projectName, query, maxTokens, semanticWeight, includeADRs, includeTests, graphExpand } = req.body;
+
+  const pack = await contextPackBuilder.build({
+    projectName,
+    query,
+    maxTokens,
+    semanticWeight,
+    includeADRs,
+    includeTests,
+    graphExpand,
+  });
+
+  res.json(pack);
 }));
 
 export default router;

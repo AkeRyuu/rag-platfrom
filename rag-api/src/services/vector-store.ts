@@ -40,6 +40,13 @@ const INDEXED_FIELDS: Array<{ fieldName: string; type: 'keyword' | 'integer' | '
   { fieldName: 'spaceKey', type: 'keyword' },
   { fieldName: 'project', type: 'keyword' },
   { fieldName: 'pageId', type: 'keyword' },
+  { fieldName: 'source', type: 'keyword' },
+  { fieldName: 'validated', type: 'keyword' },
+  { fieldName: 'symbols', type: 'keyword' },
+  { fieldName: 'chunkType', type: 'keyword' },
+  { fieldName: 'fromFile', type: 'keyword' },
+  { fieldName: 'toFile', type: 'keyword' },
+  { fieldName: 'edgeType', type: 'keyword' },
 ];
 
 class VectorStoreService {

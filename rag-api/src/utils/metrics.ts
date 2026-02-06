@@ -139,6 +139,13 @@ export const indexingDuration = new Histogram({
   registers: [registry],
 });
 
+export const indexingChunksByType = new Counter({
+  name: 'indexing_chunks_by_type_total',
+  help: 'Chunks indexed by type',
+  labelNames: ['project', 'chunk_type'],
+  registers: [registry],
+});
+
 // ============================================
 // Circuit Breaker Metrics
 // ============================================
@@ -158,6 +165,98 @@ export const circuitBreakerTrips = new Counter({
 });
 
 // ============================================
+// Agent Runtime Metrics
+// ============================================
+
+export const agentRunsTotal = new Counter({
+  name: 'agent_runs_total',
+  help: 'Total agent executions',
+  labelNames: ['project', 'agent_type', 'status'],
+  registers: [registry],
+});
+
+export const agentDuration = new Histogram({
+  name: 'agent_duration_seconds',
+  help: 'Duration of agent executions',
+  labelNames: ['project', 'agent_type'],
+  buckets: [1, 5, 10, 30, 60, 120, 300],
+  registers: [registry],
+});
+
+export const agentIterations = new Histogram({
+  name: 'agent_iterations_count',
+  help: 'Number of ReAct iterations per agent run',
+  labelNames: ['project', 'agent_type'],
+  buckets: [1, 2, 3, 5, 8, 10, 15, 20],
+  registers: [registry],
+});
+
+export const agentActionsTotal = new Counter({
+  name: 'agent_actions_total',
+  help: 'Total tool actions executed by agents',
+  labelNames: ['project', 'agent_type', 'action', 'success'],
+  registers: [registry],
+});
+
+export const agentTokensUsed = new Counter({
+  name: 'agent_tokens_total',
+  help: 'Total tokens used by agent LLM calls',
+  labelNames: ['project', 'agent_type', 'type'],
+  registers: [registry],
+});
+
+export const agentFactsExtracted = new Counter({
+  name: 'agent_facts_extracted_total',
+  help: 'Total facts extracted from agent runs',
+  labelNames: ['project', 'agent_type', 'fact_type'],
+  registers: [registry],
+});
+
+// ============================================
+// Context Enrichment Metrics
+// ============================================
+
+export const enrichmentTotal = new Counter({
+  name: 'enrichment_total',
+  help: 'Total context enrichment attempts',
+  labelNames: ['project', 'tool', 'result'],
+  registers: [registry],
+});
+
+export const enrichmentDuration = new Histogram({
+  name: 'enrichment_duration_seconds',
+  help: 'Duration of context enrichment',
+  labelNames: ['project'],
+  buckets: [0.05, 0.1, 0.25, 0.5, 1, 2],
+  registers: [registry],
+});
+
+export const enrichmentRecallCount = new Histogram({
+  name: 'enrichment_recall_count',
+  help: 'Number of memories recalled per enrichment',
+  labelNames: ['project'],
+  buckets: [0, 1, 2, 3, 5],
+  registers: [registry],
+});
+
+// ============================================
+// Platform Metrics
+// ============================================
+
+export const activeProjects = new Gauge({
+  name: 'platform_active_projects',
+  help: 'Number of projects with activity in last 24h',
+  registers: [registry],
+});
+
+export const activeSessions = new Gauge({
+  name: 'platform_active_sessions',
+  help: 'Currently active sessions across all projects',
+  labelNames: ['project'],
+  registers: [registry],
+});
+
+// ============================================
 // Memory Metrics
 // ============================================
 
@@ -165,6 +264,79 @@ export const memoryOperationsTotal = new Counter({
   name: 'memory_operations_total',
   help: 'Total memory operations',
   labelNames: ['operation', 'type', 'project'],
+  registers: [registry],
+});
+
+export const memoryGovernanceTotal = new Counter({
+  name: 'memory_governance_total',
+  help: 'Memory governance operations',
+  labelNames: ['operation', 'tier', 'project'],
+  registers: [registry],
+});
+
+// ============================================
+// Graph Metrics
+// ============================================
+
+export const graphEdgesTotal = new Counter({
+  name: 'graph_edges_total',
+  help: 'Total graph edges indexed',
+  labelNames: ['project', 'edge_type'],
+  registers: [registry],
+});
+
+export const graphExpansionDuration = new Histogram({
+  name: 'graph_expansion_duration_seconds',
+  help: 'Duration of graph expansion operations',
+  labelNames: ['project'],
+  buckets: [0.01, 0.05, 0.1, 0.25, 0.5, 1, 2],
+  registers: [registry],
+});
+
+// ============================================
+// Context Pack Metrics
+// ============================================
+
+export const contextPackDuration = new Histogram({
+  name: 'context_pack_duration_seconds',
+  help: 'Duration of context pack assembly',
+  labelNames: ['project'],
+  buckets: [0.1, 0.25, 0.5, 1, 2, 5, 10],
+  registers: [registry],
+});
+
+export const contextPackTokens = new Histogram({
+  name: 'context_pack_tokens',
+  help: 'Tokens in assembled context packs',
+  labelNames: ['project'],
+  buckets: [500, 1000, 2000, 4000, 8000, 16000],
+  registers: [registry],
+});
+
+export const rerankDuration = new Histogram({
+  name: 'rerank_duration_seconds',
+  help: 'Duration of LLM reranking',
+  labelNames: [] as string[],
+  buckets: [0.1, 0.5, 1, 2, 5, 10],
+  registers: [registry],
+});
+
+// ============================================
+// Quality Gate Metrics
+// ============================================
+
+export const qualityGateResults = new Counter({
+  name: 'quality_gate_results_total',
+  help: 'Quality gate execution results',
+  labelNames: ['gate', 'result', 'project'],
+  registers: [registry],
+});
+
+export const qualityGateDuration = new Histogram({
+  name: 'quality_gate_duration_seconds',
+  help: 'Duration of quality gate execution',
+  labelNames: ['gate', 'project'],
+  buckets: [0.1, 0.5, 1, 5, 10, 30, 60],
   registers: [registry],
 });
 

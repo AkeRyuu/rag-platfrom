@@ -10,6 +10,7 @@
 
 import { llm } from './llm';
 import { memoryService, MemoryType } from './memory';
+import { memoryGovernance } from './memory-governance';
 import { logger } from '../utils/logger';
 
 export interface ExtractedLearning {
@@ -137,18 +138,18 @@ class ConversationAnalyzerService {
 
     for (const learning of learnings) {
       try {
-        const memory = await memoryService.remember({
+        const memory = await memoryGovernance.ingest({
           projectName,
           content: learning.content,
           type: this.mapLearningType(learning.type),
           tags: [...learning.tags, 'auto-extracted'],
           relatedTo: learning.relatedTo,
           metadata: {
-            source: 'auto_conversation',
             confidence: learning.confidence,
             reasoning: learning.reasoning,
-            validated: false,
           },
+          source: 'auto_conversation',
+          confidence: learning.confidence,
         });
         savedIds.push(memory.id);
       } catch (error: any) {

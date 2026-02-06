@@ -21,6 +21,7 @@ import { queryLearning } from '../services/query-learning';
 import { codeSuggestions } from '../services/code-suggestions';
 import { cacheService } from '../services/cache';
 import { embeddingService } from '../services/embedding';
+import { graphStore } from '../services/graph-store';
 import { logger } from '../utils/logger';
 import { asyncHandler } from '../middleware/async-handler';
 import {
@@ -997,6 +998,48 @@ router.post('/confluence/search', validate(confluenceSearchSchema), asyncHandler
   const { cql, limit } = req.body;
   const pages = await confluenceService.searchPages(cql, limit);
   res.json({ pages, count: pages.length });
+}));
+
+// ============================================
+// Graph Routes
+// ============================================
+
+/**
+ * Get dependents of a file
+ * GET /api/graph/dependents
+ */
+router.get('/graph/dependents', validateProjectName, asyncHandler(async (req: Request, res: Response) => {
+  const { projectName } = req.body;
+  const file = req.query.file as string;
+  if (!file) return res.status(400).json({ error: 'file query parameter is required' });
+
+  const edges = await graphStore.getDependents(projectName, file);
+  res.json({ file, dependents: edges });
+}));
+
+/**
+ * Get dependencies of a file
+ * GET /api/graph/dependencies
+ */
+router.get('/graph/dependencies', validateProjectName, asyncHandler(async (req: Request, res: Response) => {
+  const { projectName } = req.body;
+  const file = req.query.file as string;
+  if (!file) return res.status(400).json({ error: 'file query parameter is required' });
+
+  const edges = await graphStore.getDependencies(projectName, file);
+  res.json({ file, dependencies: edges });
+}));
+
+/**
+ * Blast radius analysis
+ * POST /api/graph/blast-radius
+ */
+router.post('/graph/blast-radius', validateProjectName, asyncHandler(async (req: Request, res: Response) => {
+  const { projectName, files, maxDepth = 3 } = req.body;
+  if (!files || !Array.isArray(files)) return res.status(400).json({ error: 'files array is required' });
+
+  const result = await graphStore.getBlastRadius(projectName, files, maxDepth);
+  res.json(result);
 }));
 
 export default router;

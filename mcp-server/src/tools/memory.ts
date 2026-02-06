@@ -2,7 +2,8 @@
  * Memory tools module - Agent memory management tools.
  *
  * Tools: remember, recall, list_memories, forget, update_todo,
- *        batch_remember, validate_memory, review_memories
+ *        batch_remember, validate_memory, review_memories,
+ *        promote_memory, run_quality_gates
  */
 
 import type { ToolModule, ToolContext } from "../types.js";
@@ -261,6 +262,61 @@ export function createMemoryTools(projectName: string): ToolModule {
         },
       },
     },
+    {
+      name: "promote_memory",
+      description: `Promote a quarantine memory to durable storage in ${projectName}. Requires a reason for promotion. Optionally runs quality gates before promotion.`,
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          memoryId: {
+            type: "string",
+            description: "ID of the memory to promote",
+          },
+          reason: {
+            type: "string",
+            enum: ["human_validated", "pr_merged", "tests_passed"],
+            description: "Reason for promotion",
+          },
+          evidence: {
+            type: "string",
+            description: "Optional evidence supporting the promotion",
+          },
+          runGates: {
+            type: "boolean",
+            description:
+              "Run quality gates before promotion (default: false)",
+          },
+          affectedFiles: {
+            type: "array",
+            items: { type: "string" },
+            description:
+              "Files affected by this memory (for quality gate checking)",
+          },
+        },
+        required: ["memoryId", "reason"],
+      },
+    },
+    {
+      name: "run_quality_gates",
+      description: `Run quality gates (typecheck, tests, blast radius) for ${projectName}.`,
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          affectedFiles: {
+            type: "array",
+            items: { type: "string" },
+            description:
+              "Files to check (for related tests and blast radius)",
+          },
+          skipGates: {
+            type: "array",
+            items: { type: "string" },
+            description:
+              "Gates to skip (typecheck, test, blast_radius)",
+          },
+        },
+      },
+    },
   ];
 
   const handlers: Record<
@@ -469,12 +525,80 @@ export function createMemoryTools(projectName: string): ToolModule {
       );
     },
 
+    // ----- promote_memory -----
+    async promote_memory(args, ctx) {
+      const memoryId = args.memoryId as string;
+      const reason = args.reason as string;
+      const evidence = args.evidence as string | undefined;
+      const runGates = args.runGates as boolean | undefined;
+      const affectedFiles = args.affectedFiles as string[] | undefined;
+
+      const response = await ctx.api.post("/api/memory/promote", {
+        projectName: ctx.projectName,
+        memoryId,
+        reason,
+        evidence,
+        runGates: runGates || false,
+        projectPath: runGates ? ctx.projectPath : undefined,
+        affectedFiles: runGates ? affectedFiles : undefined,
+      });
+
+      const { memory } = response.data;
+
+      return (
+        `\u2705 **Memory promoted to durable storage**\n\n` +
+        `- **ID:** ${memory.id}\n` +
+        `- **Type:** ${memory.type}\n` +
+        `- **Reason:** ${reason}\n` +
+        (evidence ? `- **Evidence:** ${evidence}\n` : "") +
+        (runGates ? `- **Quality Gates:** passed\n` : "") +
+        `- **Content:** ${truncate(memory.content, 200)}`
+      );
+    },
+
+    // ----- run_quality_gates -----
+    async run_quality_gates(args, ctx) {
+      const affectedFiles = args.affectedFiles as string[] | undefined;
+      const skipGates = args.skipGates as string[] | undefined;
+
+      const response = await ctx.api.post("/api/quality/run", {
+        projectName: ctx.projectName,
+        projectPath: ctx.projectPath,
+        affectedFiles,
+        skipGates,
+      });
+
+      const report = response.data;
+      let result = `**Quality Report**: ${report.passed ? "\u2705 All gates passed" : "\u274C Some gates failed"}\n\n`;
+
+      for (const gate of report.gates) {
+        const icon = gate.passed ? "\u2705" : "\u274C";
+        result += `${icon} **${gate.gate}** (${(gate.duration / 1000).toFixed(1)}s)\n`;
+        result += `   ${gate.details.slice(0, 500)}\n\n`;
+      }
+
+      if (report.blastRadius) {
+        result += `\n**Blast Radius**: ${report.blastRadius.affectedFiles.length} files, depth ${report.blastRadius.depth}\n`;
+        if (report.blastRadius.affectedFiles.length > 0) {
+          result += report.blastRadius.affectedFiles
+            .slice(0, 10)
+            .map((f: string) => `  - ${f}`)
+            .join("\n");
+          if (report.blastRadius.affectedFiles.length > 10) {
+            result += `\n  ... and ${report.blastRadius.affectedFiles.length - 10} more`;
+          }
+        }
+      }
+
+      return result;
+    },
+
     // ----- review_memories -----
     async review_memories(args, ctx) {
       const limit = (args.limit as number) || 20;
 
       const response = await ctx.api.get(
-        `/api/memory/unvalidated?limit=${limit}`,
+        `/api/memory/quarantine?limit=${limit}`,
       );
       const { memories, count } = response.data;
 

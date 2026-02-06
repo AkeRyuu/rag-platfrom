@@ -19,6 +19,7 @@ import memoryRoutes from './routes/memory';
 import reviewRoutes from './routes/review';
 import testingRoutes from './routes/testing';
 import analyticsRoutes from './routes/analytics';
+import agentRoutes from './routes/agents';
 
 // Extend Express Request type
 declare global {
@@ -87,6 +88,7 @@ app.use('/api', memoryRoutes);
 app.use('/api', reviewRoutes);
 app.use('/api', testingRoutes);
 app.use('/api', analyticsRoutes);
+app.use('/api', agentRoutes);
 
 // Legacy routes for backward compatibility with cypro-rag MCP
 app.use('/api/dev/codebase', (req, res, next) => {

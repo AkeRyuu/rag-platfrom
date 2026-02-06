@@ -12,10 +12,12 @@ import { v4 as uuidv4 } from 'uuid';
 import { vectorStore, VectorPoint } from './vector-store';
 import { embeddingService } from './embedding';
 import { memoryService } from './memory';
+import { memoryGovernance } from './memory-governance';
 import { conversationAnalyzer } from './conversation-analyzer';
 import { usagePatterns } from './usage-patterns';
 import { predictiveLoader } from './predictive-loader';
 import { cacheService } from './cache';
+import { projectProfileService } from './project-profile';
 import { logger } from '../utils/logger';
 
 export interface SessionContext {
@@ -133,6 +135,16 @@ class SessionContextService {
     this.triggerPredictivePrefetch(context).catch(err =>
       logger.debug('Background prefetch failed', { error: err.message })
     );
+
+    // Build briefing with project profile + recalled context
+    try {
+      const briefing = await this.buildSessionBriefing(context);
+      if (briefing) {
+        context.metadata = { ...context.metadata, briefing };
+      }
+    } catch (err: any) {
+      logger.debug('Failed to build session briefing', { error: err.message });
+    }
 
     return context;
   }
@@ -262,7 +274,7 @@ class SessionContextService {
    * End a session and save learnings
    */
   async endSession(options: EndSessionOptions): Promise<SessionSummary> {
-    const { projectName, sessionId, summary, autoSaveLearnings = true, feedback } = options;
+    const { projectName, sessionId, summary, autoSaveLearnings = false, feedback } = options;
 
     const context = await this.getSession(projectName, sessionId);
     if (!context) {
@@ -287,12 +299,13 @@ class SessionContextService {
     if (autoSaveLearnings && context.pendingLearnings.length > 0) {
       for (const learning of context.pendingLearnings) {
         try {
-          await memoryService.remember({
+          await memoryGovernance.ingest({
             projectName,
             content: learning,
             type: 'insight',
             tags: ['session', sessionId.slice(0, 8)],
-            metadata: { sessionId, source: 'session_end' },
+            metadata: { sessionId },
+            source: 'auto_conversation',
           });
           learningsSaved++;
         } catch {
@@ -304,12 +317,13 @@ class SessionContextService {
     // Save decisions
     for (const decision of context.decisions) {
       try {
-        await memoryService.remember({
+        await memoryGovernance.ingest({
           projectName,
           content: decision,
           type: 'decision',
           tags: ['session', sessionId.slice(0, 8)],
-          metadata: { sessionId, source: 'session_end' },
+          metadata: { sessionId },
+          source: 'auto_conversation',
         });
         learningsSaved++;
       } catch {
@@ -327,6 +341,23 @@ class SessionContextService {
         summary: summary || usageSummary.summary,
       },
     });
+
+    // Auto-extract learnings from queries if session was active enough
+    if (autoSaveLearnings && context.recentQueries.length > 5) {
+      try {
+        const querySummary = context.recentQueries.slice(-10).join('\n');
+        const extracted = await conversationAnalyzer.analyze({
+          projectName,
+          conversation: querySummary,
+          context: `Session ${sessionId} tool interactions`,
+          autoSave: true,
+          minConfidence: 0.7,
+        });
+        learningsSaved += extracted.learnings?.length || 0;
+      } catch {
+        // Non-critical, ignore
+      }
+    }
 
     // Clear from active cache
     await cacheService.delete(this.getCacheKey(projectName, sessionId));
@@ -406,6 +437,48 @@ class SessionContextService {
     if (predictions.length > 0) {
       await predictiveLoader.prefetch(context.projectName, context.sessionId, predictions);
     }
+  }
+
+  /**
+   * Build a session briefing with project profile + recalled context.
+   */
+  private async buildSessionBriefing(context: SessionContext): Promise<string | null> {
+    const parts: string[] = [];
+
+    // Get project profile summary
+    try {
+      const summary = await projectProfileService.getCompactSummary(context.projectName);
+      if (summary) {
+        parts.push(summary);
+      }
+    } catch {
+      // Profile not available yet
+    }
+
+    // Auto-recall memories relevant to initial context
+    if (context.activeFeatures.length > 0 || context.recentQueries.length > 0) {
+      try {
+        const query = [...context.activeFeatures, ...context.recentQueries.slice(-3)].join(' ');
+        const memories = await memoryService.recall({
+          projectName: context.projectName,
+          query,
+          limit: 5,
+          type: 'all',
+        });
+
+        const relevant = memories.filter(m => m.score >= 0.6);
+        if (relevant.length > 0) {
+          parts.push('Relevant context:');
+          for (const m of relevant.slice(0, 5)) {
+            parts.push(`- [${m.memory.type}] ${m.memory.content.slice(0, 150)}`);
+          }
+        }
+      } catch {
+        // Non-critical
+      }
+    }
+
+    return parts.length > 0 ? parts.join('\n') : null;
   }
 
   private createNewContext(

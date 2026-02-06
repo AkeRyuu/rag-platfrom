@@ -34,6 +34,15 @@ export interface Config {
   // Redis (caching)
   REDIS_URL?: string;
 
+  // Agent Runtime
+  AGENT_OLLAMA_MODEL: string;
+  AGENT_MAX_ITERATIONS: number;
+  AGENT_TIMEOUT: number;
+
+  // Ingestion Pipeline
+  SEPARATE_COLLECTIONS: boolean;
+  LEGACY_CODEBASE_COLLECTION: boolean;
+
   // Logging
   LOG_LEVEL: string;
 }
@@ -64,8 +73,17 @@ const config: Config = {
   // Vector size based on embedding provider
   VECTOR_SIZE: parseInt(process.env.VECTOR_SIZE || '1024', 10),
 
+  // Agent Runtime
+  AGENT_OLLAMA_MODEL: process.env.AGENT_OLLAMA_MODEL || process.env.OLLAMA_MODEL || 'qwen2.5:32b',
+  AGENT_MAX_ITERATIONS: parseInt(process.env.AGENT_MAX_ITERATIONS || '8', 10),
+  AGENT_TIMEOUT: parseInt(process.env.AGENT_TIMEOUT || '120000', 10),
+
   // Redis
   REDIS_URL: process.env.REDIS_URL,
+
+  // Ingestion Pipeline
+  SEPARATE_COLLECTIONS: process.env.SEPARATE_COLLECTIONS !== 'false',
+  LEGACY_CODEBASE_COLLECTION: process.env.LEGACY_CODEBASE_COLLECTION !== 'false',
 
   // Logging
   LOG_LEVEL: process.env.LOG_LEVEL || 'info',

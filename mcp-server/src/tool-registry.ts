@@ -3,10 +3,17 @@
  */
 
 import type { ToolDefinition, ToolHandler, ToolModule, ToolContext } from "./types.js";
+import type { ContextEnricher } from "./context-enrichment.js";
 
 export class ToolRegistry {
   private tools: ToolDefinition[] = [];
   private handlers = new Map<string, ToolHandler>();
+  private enricher?: ContextEnricher;
+
+  /** Set the context enricher */
+  setEnricher(enricher: ContextEnricher): void {
+    this.enricher = enricher;
+  }
 
   /** Register a tool module */
   register(module: ToolModule): void {
@@ -29,7 +36,22 @@ export class ToolRegistry {
     }
 
     try {
-      return await handler(args, ctx);
+      // Before: auto-enrich context
+      const contextPrefix =
+        ctx.enrichmentEnabled && this.enricher
+          ? await this.enricher.before(name, args, ctx)
+          : null;
+
+      // Execute original handler
+      const result = await handler(args, ctx);
+
+      // After: track interaction (fire-and-forget)
+      if (this.enricher) {
+        this.enricher.after(name, args, result, ctx);
+      }
+
+      // Prepend context if available
+      return contextPrefix ? contextPrefix + "\n\n" + result : result;
     } catch (error: unknown) {
       const err = error as { code?: string; response?: { status: number; data: unknown }; message?: string };
       if (err.code === "ECONNREFUSED") {

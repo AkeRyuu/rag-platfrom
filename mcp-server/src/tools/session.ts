@@ -8,8 +8,9 @@ import { truncate } from "../formatters.js";
 
 /**
  * Create the session tools module with project-specific descriptions.
+ * Accepts a mutable ctx reference to update activeSessionId on start/end.
  */
-export function createSessionTools(projectName: string): ToolModule {
+export function createSessionTools(projectName: string, sharedCtx?: ToolContext): ToolModule {
   const tools = [
     {
       name: "summarize_context",
@@ -298,6 +299,11 @@ export function createSessionTools(projectName: string): ToolModule {
       });
       const data = response.data;
 
+      // Update shared context with active session ID
+      if (sharedCtx && data.sessionId) {
+        sharedCtx.activeSessionId = data.sessionId;
+      }
+
       let result = `**Session Started**\n\n`;
       result += `- **Session ID:** ${data.sessionId}\n`;
       result += `- **Started:** ${data.started}\n`;
@@ -318,6 +324,11 @@ export function createSessionTools(projectName: string): ToolModule {
       if (data.session?.metadata?.prefetchStats) {
         const pf = data.session.metadata.prefetchStats;
         result += `\n**Predictive Prefetch:** ${pf.prefetchedCount ?? 0} resources prefetched\n`;
+      }
+
+      // Include briefing if available (Sprint E)
+      if (data.briefing) {
+        result += `\n**Session Briefing:**\n${data.briefing}\n`;
       }
 
       return result;
@@ -390,6 +401,11 @@ export function createSessionTools(projectName: string): ToolModule {
         feedback,
       });
       const data = response.data;
+
+      // Clear active session ID
+      if (sharedCtx) {
+        sharedCtx.activeSessionId = undefined;
+      }
 
       let result = `**Session Ended**\n\n`;
 

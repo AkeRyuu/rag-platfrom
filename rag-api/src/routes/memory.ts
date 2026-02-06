@@ -4,6 +4,8 @@
 
 import { Router, Request, Response } from 'express';
 import { memoryService, MemoryType, TodoStatus } from '../services/memory';
+import { memoryGovernance, PromoteReason } from '../services/memory-governance';
+import { qualityGates } from '../services/quality-gates';
 import { conversationAnalyzer } from '../services/conversation-analyzer';
 import { asyncHandler } from '../middleware/async-handler';
 import {
@@ -13,6 +15,7 @@ import {
   recallMemorySchema,
   analyzeConversationSchema,
   mergeMemoriesSchema,
+  promoteMemorySchema,
 } from '../utils/validation';
 
 const router = Router();
@@ -23,6 +26,22 @@ const router = Router();
  */
 router.post('/memory', validateProjectName, validate(createMemorySchema), asyncHandler(async (req: Request, res: Response) => {
   const { projectName, content, type, tags, relatedTo, metadata } = req.body;
+
+  // Route auto-generated memories through governance
+  const source = metadata?.source as string | undefined;
+  if (source && source.startsWith('auto_')) {
+    const memory = await memoryGovernance.ingest({
+      projectName,
+      content,
+      type: type as MemoryType,
+      tags,
+      relatedTo,
+      metadata,
+      source: source as any,
+      confidence: metadata?.confidence as number | undefined,
+    });
+    return res.json({ success: true, memory });
+  }
 
   const memory = await memoryService.remember({
     projectName,
@@ -159,6 +178,54 @@ router.post('/memory/merge', validateProjectName, validate(mergeMemoriesSchema),
   });
 }));
 
+/**
+ * Recall only from durable storage (for enrichment)
+ * POST /api/memory/recall-durable
+ */
+router.post('/memory/recall-durable', validateProjectName, validate(recallMemorySchema), asyncHandler(async (req: Request, res: Response) => {
+  const { projectName, query, type, limit, tag } = req.body;
+
+  const results = await memoryGovernance.recallDurable({
+    projectName,
+    query,
+    type: type as MemoryType | 'all',
+    limit,
+    tag,
+  });
+
+  res.json({ results });
+}));
+
+/**
+ * Promote memory from quarantine to durable
+ * POST /api/memory/promote
+ */
+router.post('/memory/promote', validateProjectName, validate(promoteMemorySchema), asyncHandler(async (req: Request, res: Response) => {
+  const { projectName, memoryId, reason, evidence, runGates, projectPath, affectedFiles } = req.body;
+
+  const memory = await memoryGovernance.promote(
+    projectName,
+    memoryId,
+    reason as PromoteReason,
+    evidence,
+    runGates ? { runGates, projectPath, affectedFiles } : undefined
+  );
+
+  res.json({ success: true, memory });
+}));
+
+/**
+ * List quarantine memories for review
+ * GET /api/memory/quarantine
+ */
+router.get('/memory/quarantine', validateProjectName, asyncHandler(async (req: Request, res: Response) => {
+  const { projectName } = req.body;
+  const limit = parseInt(req.query.limit as string) || 20;
+
+  const memories = await memoryGovernance.listQuarantine(projectName, limit);
+  res.json({ memories, count: memories.length });
+}));
+
 // ============================================
 // Batch & Auto-learning Routes
 // ============================================
@@ -237,6 +304,47 @@ router.get('/memory/unvalidated', validateProjectName, asyncHandler(async (req: 
 
   const memories = await memoryService.getUnvalidatedMemories(projectName, limit);
   res.json({ memories, count: memories.length });
+}));
+
+// ============================================
+// Quality Gate Routes
+// ============================================
+
+/**
+ * Run quality gates on demand
+ * POST /api/quality/run
+ */
+router.post('/quality/run', validateProjectName, asyncHandler(async (req: Request, res: Response) => {
+  const { projectName, projectPath, affectedFiles, skipGates } = req.body;
+
+  if (!projectPath) {
+    return res.status(400).json({ error: 'projectPath is required' });
+  }
+
+  const report = await qualityGates.runGates({
+    projectName,
+    projectPath,
+    affectedFiles,
+    skipGates,
+  });
+
+  res.json(report);
+}));
+
+/**
+ * Blast radius analysis
+ * POST /api/quality/blast-radius
+ */
+router.post('/quality/blast-radius', validateProjectName, asyncHandler(async (req: Request, res: Response) => {
+  const { projectName, files, maxDepth = 3 } = req.body;
+
+  if (!files || !Array.isArray(files)) {
+    return res.status(400).json({ error: 'files array is required' });
+  }
+
+  const { graphStore } = await import('../services/graph-store');
+  const result = await graphStore.getBlastRadius(projectName, files, maxDepth);
+  res.json(result);
 }));
 
 export default router;
