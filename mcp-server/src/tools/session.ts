@@ -314,6 +314,12 @@ export function createSessionTools(projectName: string): ToolModule {
         result += "\n";
       }
 
+      // Include prefetch stats if available
+      if (data.session?.metadata?.prefetchStats) {
+        const pf = data.session.metadata.prefetchStats;
+        result += `\n**Predictive Prefetch:** ${pf.prefetchedCount ?? 0} resources prefetched\n`;
+      }
+
       return result;
     },
 

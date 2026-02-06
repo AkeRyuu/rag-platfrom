@@ -14,6 +14,7 @@ import { embeddingService } from './embedding';
 import { memoryService } from './memory';
 import { conversationAnalyzer } from './conversation-analyzer';
 import { usagePatterns } from './usage-patterns';
+import { predictiveLoader } from './predictive-loader';
 import { cacheService } from './cache';
 import { logger } from '../utils/logger';
 
@@ -127,6 +128,12 @@ class SessionContextService {
     await this.persistSession(context);
 
     logger.info(`Session started: ${sessionId}`, { projectName, resumeFrom });
+
+    // Background: generate predictions and prefetch likely-needed resources
+    this.triggerPredictivePrefetch(context).catch(err =>
+      logger.debug('Background prefetch failed', { error: err.message })
+    );
+
     return context;
   }
 
@@ -244,6 +251,11 @@ class SessionContextService {
     }
 
     await this.updateSession(projectName, sessionId, context);
+
+    // Background: update predictions on new activity
+    this.triggerPredictivePrefetch(context).catch(err =>
+      logger.debug('Background prefetch on activity failed', { error: err.message })
+    );
   }
 
   /**
@@ -375,6 +387,26 @@ class SessionContextService {
   // ============================================
   // Private Helpers
   // ============================================
+
+  /**
+   * Trigger predictive prefetch in the background (fire-and-forget)
+   */
+  private async triggerPredictivePrefetch(context: SessionContext): Promise<void> {
+    const predictions = await predictiveLoader.predict(
+      context.projectName,
+      context.sessionId,
+      {
+        currentFiles: context.currentFiles,
+        recentQueries: context.recentQueries,
+        toolsUsed: context.toolsUsed,
+        activeFeatures: context.activeFeatures,
+      }
+    );
+
+    if (predictions.length > 0) {
+      await predictiveLoader.prefetch(context.projectName, context.sessionId, predictions);
+    }
+  }
 
   private createNewContext(
     sessionId: string,

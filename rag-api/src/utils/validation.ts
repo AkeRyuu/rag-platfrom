@@ -291,6 +291,69 @@ export function validateProjectName(
   next();
 }
 
+// ============================================
+// Prediction Schemas
+// ============================================
+
+export const prefetchSchema = z.object({
+  projectName: projectNameSchema.optional(),
+  sessionId: z.string().min(1),
+});
+
+export const predictionStatsSchema = z.object({
+  projectName: projectNameSchema.optional(),
+  sessionId: z.string().optional(),
+});
+
+export const trackPredictionSchema = z.object({
+  projectName: projectNameSchema.optional(),
+  sessionId: z.string().min(1),
+  resource: z.string().min(1).max(5000),
+  hit: z.boolean(),
+});
+
+// ============================================
+// Advanced Feature Schemas
+// ============================================
+
+export const mergeMemoriesSchema = z.object({
+  projectName: projectNameSchema.optional(),
+  type: z.union([memoryTypeSchema, z.literal('all')]).default('all'),
+  threshold: z.number().min(0.5).max(1).default(0.9),
+  dryRun: z.boolean().default(true),
+  limit: z.number().int().min(1).max(200).default(50),
+});
+
+export const completionContextSchema = z.object({
+  projectName: projectNameSchema.optional(),
+  currentFile: z.string().min(1),
+  currentCode: z.string().min(1).max(50000),
+  language: z.string().optional(),
+  limit: z.number().int().min(1).max(20).default(5),
+});
+
+export const importSuggestionsSchema = z.object({
+  projectName: projectNameSchema.optional(),
+  currentFile: z.string().min(1),
+  currentCode: z.string().min(1).max(50000),
+  language: z.string().optional(),
+  limit: z.number().int().min(1).max(30).default(10),
+});
+
+export const typeContextSchema = z.object({
+  projectName: projectNameSchema.optional(),
+  typeName: z.string().max(200).optional(),
+  code: z.string().max(50000).optional(),
+  currentFile: z.string().optional(),
+  limit: z.number().int().min(1).max(20).default(5),
+});
+
+export const behaviorPatternsSchema = z.object({
+  projectName: projectNameSchema.optional(),
+  days: z.number().int().min(1).max(90).default(7),
+  sessionId: z.string().optional(),
+});
+
 // Type exports for use in routes
 export type SearchInput = z.infer<typeof searchSchema>;
 export type SearchSimilarInput = z.infer<typeof searchSimilarSchema>;

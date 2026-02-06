@@ -30,6 +30,9 @@ import {
   confluenceSearchSchema,
   searchFeedbackSchema,
   memoryFeedbackSchema,
+  completionContextSchema,
+  importSuggestionsSchema,
+  typeContextSchema,
 } from '../utils/validation';
 
 const router = Router();
@@ -800,6 +803,68 @@ router.post('/code/context', validateProjectName, asyncHandler(async (req: Reque
     includeRelated,
     includeTests,
     includeImports,
+  });
+
+  res.json(context);
+}));
+
+// ============================================
+// Advanced Code Suggestion Routes
+// ============================================
+
+/**
+ * Get code completion context
+ * POST /api/code/completion-context
+ */
+router.post('/code/completion-context', validateProjectName, validate(completionContextSchema), asyncHandler(async (req: Request, res: Response) => {
+  const { projectName, currentFile, currentCode, language, limit } = req.body;
+
+  const context = await codeSuggestions.getCompletionContext({
+    projectName,
+    currentFile,
+    currentCode,
+    language,
+    limit,
+  });
+
+  res.json(context);
+}));
+
+/**
+ * Get import suggestions
+ * POST /api/code/import-suggestions
+ */
+router.post('/code/import-suggestions', validateProjectName, validate(importSuggestionsSchema), asyncHandler(async (req: Request, res: Response) => {
+  const { projectName, currentFile, currentCode, language, limit } = req.body;
+
+  const suggestions = await codeSuggestions.getImportSuggestions({
+    projectName,
+    currentFile,
+    currentCode,
+    language,
+    limit,
+  });
+
+  res.json(suggestions);
+}));
+
+/**
+ * Get type/interface context
+ * POST /api/code/type-context
+ */
+router.post('/code/type-context', validateProjectName, validate(typeContextSchema), asyncHandler(async (req: Request, res: Response) => {
+  const { projectName, typeName, code, currentFile, limit } = req.body;
+
+  if (!typeName && !code) {
+    return res.status(400).json({ error: 'typeName or code is required' });
+  }
+
+  const context = await codeSuggestions.getTypeContext({
+    projectName,
+    typeName,
+    code,
+    currentFile,
+    limit,
   });
 
   res.json(context);

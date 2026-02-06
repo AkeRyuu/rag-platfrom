@@ -223,6 +223,144 @@ class UsageTrackerService {
   }
 
   /**
+   * Analyze user behavior patterns from tool usage data
+   */
+  async getBehaviorPatterns(projectName: string, options: {
+    days?: number;
+    sessionId?: string;
+  } = {}): Promise<{
+    peakHours: Array<{ hour: number; count: number }>;
+    toolPreferences: Array<{ tool: string; count: number; avgDuration: number }>;
+    workflows: Array<{ sequence: string[]; count: number }>;
+    sessionStats: { totalSessions: number; avgToolsPerSession: number; avgDurationMinutes: number };
+  }> {
+    const { days = 7, sessionId } = options;
+    const collectionName = this.getCollectionName(projectName);
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - days);
+
+    const result = {
+      peakHours: [] as Array<{ hour: number; count: number }>,
+      toolPreferences: [] as Array<{ tool: string; count: number; avgDuration: number }>,
+      workflows: [] as Array<{ sequence: string[]; count: number }>,
+      sessionStats: { totalSessions: 0, avgToolsPerSession: 0, avgDurationMinutes: 0 },
+    };
+
+    try {
+      // Scroll all usage records in time range
+      const usages: ToolUsage[] = [];
+      let offset: string | number | undefined = undefined;
+      const mustConditions: Record<string, unknown>[] = [
+        { key: 'timestamp', range: { gte: cutoffDate.toISOString() } },
+      ];
+      if (sessionId) {
+        mustConditions.push({ key: 'sessionId', match: { value: sessionId } });
+      }
+
+      do {
+        const response = await vectorStore['client'].scroll(collectionName, {
+          limit: 1000,
+          offset,
+          with_payload: true,
+          with_vector: false,
+          filter: { must: mustConditions },
+        });
+
+        for (const point of response.points) {
+          usages.push(point.payload as unknown as ToolUsage);
+        }
+
+        offset = response.next_page_offset as string | number | undefined;
+      } while (offset && usages.length < 10000);
+
+      if (usages.length === 0) return result;
+
+      // Peak hours
+      const hourCounts: Record<number, number> = {};
+      for (const u of usages) {
+        const hour = new Date(u.timestamp).getHours();
+        hourCounts[hour] = (hourCounts[hour] || 0) + 1;
+      }
+      result.peakHours = Object.entries(hourCounts)
+        .map(([h, c]) => ({ hour: parseInt(h), count: c }))
+        .sort((a, b) => b.count - a.count);
+
+      // Tool preferences with avg duration
+      const toolStats = new Map<string, { count: number; totalDuration: number }>();
+      for (const u of usages) {
+        const existing = toolStats.get(u.toolName) || { count: 0, totalDuration: 0 };
+        existing.count++;
+        existing.totalDuration += u.durationMs;
+        toolStats.set(u.toolName, existing);
+      }
+      result.toolPreferences = Array.from(toolStats.entries())
+        .map(([tool, stats]) => ({
+          tool,
+          count: stats.count,
+          avgDuration: Math.round(stats.totalDuration / stats.count),
+        }))
+        .sort((a, b) => b.count - a.count);
+
+      // Group by session to find workflows (tool sequences)
+      const sessions = new Map<string, ToolUsage[]>();
+      for (const u of usages) {
+        const sid = u.sessionId || 'unknown';
+        if (!sessions.has(sid)) sessions.set(sid, []);
+        sessions.get(sid)!.push(u);
+      }
+
+      // Sort each session by timestamp
+      for (const [, sessionUsages] of sessions) {
+        sessionUsages.sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+      }
+
+      // Extract 2-gram and 3-gram tool sequences
+      const ngramCounts = new Map<string, { sequence: string[]; count: number }>();
+      for (const [, sessionUsages] of sessions) {
+        const tools = sessionUsages.map(u => u.toolName);
+        for (let n = 2; n <= 3; n++) {
+          for (let i = 0; i <= tools.length - n; i++) {
+            const ngram = tools.slice(i, i + n);
+            const key = ngram.join(' -> ');
+            const existing = ngramCounts.get(key) || { sequence: ngram, count: 0 };
+            existing.count++;
+            ngramCounts.set(key, existing);
+          }
+        }
+      }
+
+      result.workflows = Array.from(ngramCounts.values())
+        .filter(w => w.count >= 2)
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 15);
+
+      // Session stats
+      result.sessionStats.totalSessions = sessions.size;
+      const sessionSizes = Array.from(sessions.values()).map(s => s.length);
+      result.sessionStats.avgToolsPerSession = sessionSizes.length > 0
+        ? Math.round(sessionSizes.reduce((a, b) => a + b, 0) / sessionSizes.length)
+        : 0;
+
+      const sessionDurations = Array.from(sessions.values()).map(s => {
+        if (s.length < 2) return 0;
+        const first = new Date(s[0].timestamp).getTime();
+        const last = new Date(s[s.length - 1].timestamp).getTime();
+        return (last - first) / 60000; // minutes
+      });
+      result.sessionStats.avgDurationMinutes = sessionDurations.length > 0
+        ? Math.round(sessionDurations.reduce((a, b) => a + b, 0) / sessionDurations.length)
+        : 0;
+
+      return result;
+    } catch (error: any) {
+      if (error.status === 404) {
+        return result;
+      }
+      throw error;
+    }
+  }
+
+  /**
    * Get knowledge gaps (queries with no/low results)
    */
   async getKnowledgeGaps(projectName: string, limit: number = 20): Promise<{

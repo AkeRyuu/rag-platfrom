@@ -39,6 +39,7 @@ import { createFeedbackTools } from "./tools/feedback.js";
 import { createSuggestionTools } from "./tools/suggestions.js";
 import { createCacheTools } from "./tools/cache.js";
 import { createGuidelinesTools } from "./tools/guidelines.js";
+import { createAdvancedTools } from "./tools/advanced.js";
 
 // Configuration from environment
 const PROJECT_NAME = process.env.PROJECT_NAME || "default";
@@ -76,6 +77,7 @@ registry.register(createFeedbackTools(PROJECT_NAME));
 registry.register(createSuggestionTools(PROJECT_NAME));
 registry.register(createCacheTools(PROJECT_NAME));
 registry.register(createGuidelinesTools(PROJECT_NAME));
+registry.register(createAdvancedTools(PROJECT_NAME));
 
 // MCP Server
 const server = new Server(
@@ -109,7 +111,7 @@ async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
   console.error(`${PROJECT_NAME} RAG MCP server running (collection prefix: ${COLLECTION_PREFIX})`);
-  console.error(`Registered ${registry.getTools().length} tools from 16 modules`);
+  console.error(`Registered ${registry.getTools().length} tools from 17 modules`);
 }
 
 main().catch(console.error);

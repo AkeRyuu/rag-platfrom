@@ -12,6 +12,7 @@ import {
   createMemorySchema,
   recallMemorySchema,
   analyzeConversationSchema,
+  mergeMemoriesSchema,
 } from '../utils/validation';
 
 const router = Router();
@@ -132,6 +133,30 @@ router.get('/memory/stats', validateProjectName, asyncHandler(async (req: Reques
 
   const stats = await memoryService.getStats(projectName);
   res.json({ stats });
+}));
+
+/**
+ * Merge duplicate/similar memories
+ * POST /api/memory/merge
+ */
+router.post('/memory/merge', validateProjectName, validate(mergeMemoriesSchema), asyncHandler(async (req: Request, res: Response) => {
+  const { projectName, type, threshold, dryRun, limit } = req.body;
+
+  const result = await memoryService.mergeMemories({
+    projectName,
+    type: type as MemoryType | 'all',
+    threshold,
+    dryRun,
+    limit,
+  });
+
+  res.json({
+    ...result,
+    dryRun,
+    message: dryRun
+      ? `Found ${result.totalMerged} merge candidates (dry run, no changes made)`
+      : `Merged ${result.totalMerged} memory clusters`,
+  });
 }));
 
 // ============================================

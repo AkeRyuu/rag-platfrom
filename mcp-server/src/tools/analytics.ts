@@ -88,6 +88,19 @@ export function createAnalyticsTools(projectName: string): ToolModule {
         required: ["collectionName"],
       },
     },
+    {
+      name: "get_prediction_stats",
+      description: `Get predictive loader stats for ${projectName}. Shows prediction accuracy, hit rates, and strategy breakdown.`,
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          sessionId: {
+            type: "string",
+            description: "Session ID to get stats for. If omitted, returns aggregate stats.",
+          },
+        },
+      },
+    },
   ];
 
   const handlers: Record<string, ToolHandler> = {
@@ -224,6 +237,31 @@ export function createAnalyticsTools(projectName: string): ToolModule {
         result += `- **${s.name}** - ${sizeMB} MB`;
         if (s.createdAt) result += ` (${new Date(s.createdAt).toLocaleString()})`;
         result += "\n";
+      }
+
+      return result;
+    },
+
+    get_prediction_stats: async (
+      args: Record<string, unknown>,
+      ctx: ToolContext
+    ): Promise<string> => {
+      const { sessionId } = args as { sessionId?: string };
+      const params = sessionId ? `?sessionId=${sessionId}` : "";
+      const response = await ctx.api.get(`/api/predictions/stats${params}`);
+      const data = response.data;
+
+      let result = `## Prediction Stats${sessionId ? ` (Session ${sessionId})` : ""}\n\n`;
+      result += `- **Total Predictions:** ${data.totalPredictions ?? 0}\n`;
+      result += `- **Hits:** ${data.totalHits ?? 0}\n`;
+      result += `- **Misses:** ${data.totalMisses ?? 0}\n`;
+      result += `- **Hit Rate:** ${data.hitRate !== undefined ? pct(data.hitRate) : "N/A"}\n\n`;
+
+      if (data.byStrategy && Object.keys(data.byStrategy).length > 0) {
+        result += `### By Strategy\n`;
+        for (const [strategy, stats] of Object.entries(data.byStrategy) as [string, any][]) {
+          result += `- **${strategy}**: ${stats.predictions} predictions, ${stats.hits} hits (${pct(stats.hitRate)})\n`;
+        }
       }
 
       return result;

@@ -328,6 +328,233 @@ class CodeSuggestionService {
     }
   }
 
+  /**
+   * Get code completion context - find patterns and imports from similar code
+   */
+  async getCompletionContext(options: {
+    projectName: string;
+    currentFile: string;
+    currentCode: string;
+    language?: string;
+    limit?: number;
+  }): Promise<{
+    patterns: Array<{ file: string; content: string; score: number }>;
+    imports: string[];
+    symbols: string[];
+  }> {
+    const { projectName, currentFile, currentCode, language, limit = 5 } = options;
+    const collection = this.getCodebaseCollection(projectName);
+
+    const result = {
+      patterns: [] as Array<{ file: string; content: string; score: number }>,
+      imports: [] as string[],
+      symbols: [] as string[],
+    };
+
+    try {
+      const embedding = await embeddingService.embed(currentCode);
+
+      // Search codebase, excluding current file
+      const filter: Record<string, unknown> = {
+        must_not: [{ key: 'file', match: { value: currentFile } }],
+      };
+      if (language) {
+        filter.must = [{ key: 'language', match: { value: language } }];
+      }
+
+      const results = await vectorStore.search(collection, embedding, limit * 3, filter, 0.5);
+
+      // Deduplicate by file
+      const seenFiles = new Set<string>();
+      for (const r of results) {
+        const file = r.payload.file as string;
+        if (seenFiles.has(file)) continue;
+        seenFiles.add(file);
+
+        result.patterns.push({
+          file,
+          content: r.payload.content as string,
+          score: r.score,
+        });
+
+        // Extract imports from results
+        const fileImports = this.extractImports(r.payload.content as string);
+        for (const imp of fileImports) {
+          if (!result.imports.includes(imp)) {
+            result.imports.push(imp);
+          }
+        }
+
+        // Extract exported symbols
+        const symbols = this.extractSymbols(r.payload.content as string);
+        for (const sym of symbols) {
+          if (!result.symbols.includes(sym)) {
+            result.symbols.push(sym);
+          }
+        }
+
+        if (result.patterns.length >= limit) break;
+      }
+
+      return result;
+    } catch (error: any) {
+      logger.error('Failed to get completion context', { error: error.message });
+      return result;
+    }
+  }
+
+  /**
+   * Suggest missing imports based on similar files
+   */
+  async getImportSuggestions(options: {
+    projectName: string;
+    currentFile: string;
+    currentCode: string;
+    language?: string;
+    limit?: number;
+  }): Promise<{
+    suggestions: Array<{ importPath: string; frequency: number; usedBy: string[] }>;
+    currentImports: string[];
+  }> {
+    const { projectName, currentFile, currentCode, language, limit = 10 } = options;
+    const collection = this.getCodebaseCollection(projectName);
+
+    const currentImports = this.extractImports(currentCode);
+
+    const result = {
+      suggestions: [] as Array<{ importPath: string; frequency: number; usedBy: string[] }>,
+      currentImports,
+    };
+
+    try {
+      const embedding = await embeddingService.embed(currentCode);
+
+      const filter: Record<string, unknown> = {
+        must_not: [{ key: 'file', match: { value: currentFile } }],
+      };
+      if (language) {
+        filter.must = [{ key: 'language', match: { value: language } }];
+      }
+
+      const results = await vectorStore.search(collection, embedding, 20, filter, 0.5);
+
+      // Aggregate imports from similar files
+      const importFreq = new Map<string, { count: number; files: string[] }>();
+
+      for (const r of results) {
+        const file = r.payload.file as string;
+        const fileImports = this.extractImports(r.payload.content as string);
+
+        for (const imp of fileImports) {
+          // Skip imports already present
+          if (currentImports.includes(imp)) continue;
+
+          const existing = importFreq.get(imp) || { count: 0, files: [] };
+          existing.count++;
+          if (!existing.files.includes(file)) {
+            existing.files.push(file);
+          }
+          importFreq.set(imp, existing);
+        }
+      }
+
+      // Rank by frequency
+      result.suggestions = Array.from(importFreq.entries())
+        .sort((a, b) => b[1].count - a[1].count)
+        .slice(0, limit)
+        .map(([importPath, data]) => ({
+          importPath,
+          frequency: data.count,
+          usedBy: data.files.slice(0, 3),
+        }));
+
+      return result;
+    } catch (error: any) {
+      logger.error('Failed to get import suggestions', { error: error.message });
+      return result;
+    }
+  }
+
+  /**
+   * Look up type/interface/class definitions and their usage
+   */
+  async getTypeContext(options: {
+    projectName: string;
+    typeName?: string;
+    code?: string;
+    currentFile?: string;
+    limit?: number;
+  }): Promise<{
+    definitions: Array<{ file: string; content: string; score: number; typeName: string }>;
+    usages: Array<{ file: string; content: string; score: number }>;
+  }> {
+    const { projectName, typeName, code, currentFile, limit = 5 } = options;
+    const collection = this.getCodebaseCollection(projectName);
+
+    const result = {
+      definitions: [] as Array<{ file: string; content: string; score: number; typeName: string }>,
+      usages: [] as Array<{ file: string; content: string; score: number }>,
+    };
+
+    if (!typeName && !code) {
+      return result;
+    }
+
+    try {
+      // Build a search query targeting type definitions
+      const searchQuery = typeName
+        ? `interface ${typeName} type ${typeName} class ${typeName}`
+        : code!;
+
+      const embedding = await embeddingService.embed(searchQuery);
+
+      let filter: Record<string, unknown> | undefined;
+      if (currentFile) {
+        filter = { must_not: [{ key: 'file', match: { value: currentFile } }] };
+      }
+
+      const results = await vectorStore.search(collection, embedding, limit * 4, filter, 0.4);
+
+      const typePattern = typeName
+        ? new RegExp(`(?:interface|type|class|enum)\\s+${typeName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`)
+        : null;
+
+      const seenDefs = new Set<string>();
+      const seenUsages = new Set<string>();
+
+      for (const r of results) {
+        const file = r.payload.file as string;
+        const content = r.payload.content as string;
+
+        // Check if this contains a type definition
+        if (typePattern && typePattern.test(content)) {
+          if (!seenDefs.has(file)) {
+            seenDefs.add(file);
+            result.definitions.push({
+              file,
+              content,
+              score: r.score,
+              typeName: typeName!,
+            });
+          }
+        } else {
+          // It's a usage
+          if (!seenUsages.has(file) && result.usages.length < limit) {
+            seenUsages.add(file);
+            result.usages.push({ file, content, score: r.score });
+          }
+        }
+
+        if (result.definitions.length >= limit && result.usages.length >= limit) break;
+      }
+
+      return result;
+    } catch (error: any) {
+      logger.error('Failed to get type context', { error: error.message });
+      return result;
+    }
+  }
+
   // ============================================
   // Private Helpers
   // ============================================
@@ -441,6 +668,19 @@ class CodeSuggestionService {
     }
 
     return coverage;
+  }
+
+  private extractSymbols(code: string): string[] {
+    const symbols: string[] = [];
+
+    // Exported functions/constants
+    const exportMatches = code.match(/export\s+(?:const|function|class|interface|type|enum)\s+(\w+)/g) || [];
+    for (const match of exportMatches) {
+      const m = match.match(/(?:const|function|class|interface|type|enum)\s+(\w+)/);
+      if (m) symbols.push(m[1]);
+    }
+
+    return [...new Set(symbols)];
   }
 
   private extractImports(code: string): string[] {

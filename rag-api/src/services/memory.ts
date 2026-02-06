@@ -7,6 +7,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import { vectorStore, VectorPoint } from './vector-store';
 import { embeddingService } from './embedding';
+import { llm } from './llm';
 import { logger } from '../utils/logger';
 
 export type MemoryType = 'decision' | 'insight' | 'context' | 'todo' | 'conversation' | 'note';
@@ -427,6 +428,208 @@ class MemoryService {
     logger.info(`Memory validated: ${memoryId} = ${validated}`, { projectName });
 
     return updatedMemory;
+  }
+
+  /**
+   * Merge duplicate/similar memories into consolidated entries
+   */
+  async mergeMemories(options: {
+    projectName: string;
+    type?: MemoryType | 'all';
+    threshold?: number;
+    dryRun?: boolean;
+    limit?: number;
+  }): Promise<{
+    merged: Array<{ original: Memory[]; merged: Memory }>;
+    totalFound: number;
+    totalMerged: number;
+  }> {
+    const {
+      projectName,
+      type = 'all',
+      threshold = 0.9,
+      dryRun = true,
+      limit = 50,
+    } = options;
+
+    const collectionName = this.getCollectionName(projectName);
+    const result: { merged: Array<{ original: Memory[]; merged: Memory }>; totalFound: number; totalMerged: number } = {
+      merged: [],
+      totalFound: 0,
+      totalMerged: 0,
+    };
+
+    try {
+      // Scroll through memories to find candidates
+      const mustConditions: Record<string, unknown>[] = [];
+      if (type && type !== 'all') {
+        mustConditions.push({ key: 'type', match: { value: type } });
+      }
+      const filter = mustConditions.length > 0 ? { must: mustConditions } : undefined;
+
+      const memories: Array<{ id: string; payload: Record<string, unknown> }> = [];
+      let offset: string | number | undefined = undefined;
+
+      do {
+        const response = await vectorStore['client'].scroll(collectionName, {
+          limit: 500,
+          offset,
+          with_payload: true,
+          with_vector: false,
+          filter,
+        });
+
+        for (const point of response.points) {
+          memories.push({ id: point.id as string, payload: point.payload as Record<string, unknown> });
+        }
+
+        offset = response.next_page_offset as string | number | undefined;
+      } while (offset && memories.length < limit * 10);
+
+      result.totalFound = memories.length;
+
+      if (memories.length < 2) {
+        return result;
+      }
+
+      // Find clusters of similar memories using recommend
+      const processed = new Set<string>();
+      const clusters: Memory[][] = [];
+
+      for (const mem of memories) {
+        if (processed.has(mem.id)) continue;
+
+        try {
+          const similar = await vectorStore.recommend(
+            collectionName,
+            [mem.id],
+            [],
+            10
+          );
+
+          const cluster: Memory[] = [this.pointToMemory(mem)];
+          processed.add(mem.id);
+
+          for (const s of similar) {
+            if (s.score >= threshold && !processed.has(s.id)) {
+              cluster.push(this.pointToMemory({ id: s.id, payload: s.payload }));
+              processed.add(s.id);
+            }
+          }
+
+          if (cluster.length > 1) {
+            clusters.push(cluster);
+          }
+        } catch {
+          // Skip if recommend fails for this point
+          processed.add(mem.id);
+        }
+
+        if (clusters.length >= limit) break;
+      }
+
+      // Merge each cluster
+      for (const cluster of clusters) {
+        const mergedContent = await this.llmMergeMemories(cluster);
+
+        const mergedMemory: Memory = {
+          id: uuidv4(),
+          type: cluster[0].type,
+          content: mergedContent,
+          tags: [...new Set(cluster.flatMap(m => m.tags))],
+          relatedTo: cluster.find(m => m.relatedTo)?.relatedTo,
+          createdAt: cluster.reduce((earliest, m) =>
+            m.createdAt < earliest ? m.createdAt : earliest, cluster[0].createdAt),
+          updatedAt: new Date().toISOString(),
+          metadata: {
+            mergedFrom: cluster.map(m => m.id),
+            mergedAt: new Date().toISOString(),
+            originalCount: cluster.length,
+          },
+        };
+
+        result.merged.push({ original: cluster, merged: mergedMemory });
+
+        if (!dryRun) {
+          // Create merged memory
+          const embedding = await embeddingService.embed(
+            `${mergedMemory.type}: ${mergedMemory.content}${mergedMemory.relatedTo ? ` (related to: ${mergedMemory.relatedTo})` : ''}`
+          );
+
+          await vectorStore.upsert(collectionName, [{
+            id: mergedMemory.id,
+            vector: embedding,
+            payload: { ...mergedMemory, project: projectName },
+          }]);
+
+          // Delete original memories
+          const idsToDelete = cluster.map(m => m.id);
+          await vectorStore.delete(collectionName, idsToDelete);
+        }
+
+        result.totalMerged++;
+      }
+
+      logger.info(`Memory merge: ${result.totalMerged} clusters${dryRun ? ' (dry run)' : ' merged'}`, { projectName });
+      return result;
+    } catch (error: any) {
+      if (error.status === 404) {
+        return result;
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Use LLM to merge multiple memory contents into one consolidated entry
+   */
+  private async llmMergeMemories(memories: Memory[]): Promise<string> {
+    const memoryTexts = memories.map((m, i) => `[${i + 1}] ${m.content}`).join('\n');
+
+    try {
+      const result = await llm.complete(
+        `Merge the following ${memories.length} related memory entries into a single, concise memory that preserves all unique information:\n\n${memoryTexts}`,
+        {
+          systemPrompt: 'You are a memory consolidation assistant. Merge related memories into one concise entry. Preserve all unique facts, decisions, and insights. Remove redundancy. Output only the merged text, nothing else.',
+          maxTokens: 500,
+          temperature: 0.3,
+        }
+      );
+      return result.text.trim();
+    } catch {
+      // Fallback: concatenate with dedup
+      const seen = new Set<string>();
+      const parts: string[] = [];
+      for (const m of memories) {
+        const normalized = m.content.trim().toLowerCase();
+        if (!seen.has(normalized)) {
+          seen.add(normalized);
+          parts.push(m.content.trim());
+        }
+      }
+      return parts.join(' | ');
+    }
+  }
+
+  /**
+   * Convert a raw Qdrant point to a Memory object
+   */
+  private pointToMemory(point: { id: string; payload: Record<string, unknown> }): Memory {
+    return {
+      id: point.id,
+      type: point.payload.type as MemoryType,
+      content: point.payload.content as string,
+      tags: (point.payload.tags as string[]) || [],
+      relatedTo: point.payload.relatedTo as string | undefined,
+      createdAt: point.payload.createdAt as string,
+      updatedAt: point.payload.updatedAt as string,
+      metadata: point.payload.metadata as Record<string, unknown> | undefined,
+      status: point.payload.status as TodoStatus | undefined,
+      statusHistory: point.payload.statusHistory as Memory['statusHistory'],
+      source: point.payload.source as MemorySource | undefined,
+      confidence: point.payload.confidence as number | undefined,
+      validated: point.payload.validated as boolean | undefined,
+    };
   }
 
   /**
