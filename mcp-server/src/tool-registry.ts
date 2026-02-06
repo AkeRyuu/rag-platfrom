@@ -83,7 +83,7 @@ export class ToolRegistry {
     if (TRACKING_EXCLUDE.has(name)) return;
 
     ctx.api
-      .post("/track-usage", {
+      .post("/api/track-usage", {
         projectName: ctx.projectName,
         sessionId: ctx.activeSessionId,
         toolName: name,
