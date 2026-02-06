@@ -492,7 +492,26 @@ export async function indexProject(options: IndexOptions): Promise<IndexStats> {
 
         // Upsert batch
         if (points.length > 0) {
-          await vectorStore.upsert(collectionName, points);
+          // Legacy collection (backward compat)
+          if (config.LEGACY_CODEBASE_COLLECTION) {
+            await vectorStore.upsert(collectionName, points);
+          }
+
+          // Route to typed collections
+          if (config.SEPARATE_COLLECTIONS) {
+            const typeMap: Record<string, VectorPoint[]> = {};
+            for (const point of points) {
+              const ct = (point.payload as Record<string, unknown>).chunkType as string;
+              if (ct && ct !== 'unknown') {
+                if (!typeMap[ct]) typeMap[ct] = [];
+                typeMap[ct].push(point);
+              }
+            }
+            for (const [type, pts] of Object.entries(typeMap)) {
+              const typedCollection = `${projectName}_${type}`;
+              await vectorStore.upsert(typedCollection, pts);
+            }
+          }
         }
       }
 
@@ -764,9 +783,25 @@ export async function reindexWithZeroDowntime(options: ReindexOptions): Promise<
           }
         }
 
-        // Upsert to NEW collection
+        // Upsert to NEW collection (legacy)
         if (points.length > 0) {
           await vectorStore.upsert(newCollectionName, points);
+
+          // Also route to typed collections
+          if (config.SEPARATE_COLLECTIONS) {
+            const typeMap: Record<string, VectorPoint[]> = {};
+            for (const point of points) {
+              const ct = (point.payload as Record<string, unknown>).chunkType as string;
+              if (ct && ct !== 'unknown') {
+                if (!typeMap[ct]) typeMap[ct] = [];
+                typeMap[ct].push(point);
+              }
+            }
+            for (const [type, pts] of Object.entries(typeMap)) {
+              const typedCollection = `${projectName}_${type}`;
+              await vectorStore.upsert(typedCollection, pts);
+            }
+          }
         }
       }
 
