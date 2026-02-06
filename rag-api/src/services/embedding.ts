@@ -216,7 +216,7 @@ class EmbeddingService {
 
     // Compute uncached embeddings
     try {
-      const response = await axios.post(`${config.BGE_M3_URL}/embed_batch`, {
+      const response = await axios.post(`${config.BGE_M3_URL}/embed/batch`, {
         texts: uncachedTexts,
       });
       const computed = response.data.embeddings;
