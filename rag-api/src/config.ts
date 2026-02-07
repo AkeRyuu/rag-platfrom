@@ -43,6 +43,9 @@ export interface Config {
   SEPARATE_COLLECTIONS: boolean;
   LEGACY_CODEBASE_COLLECTION: boolean;
 
+  // Sparse Vectors
+  SPARSE_VECTORS_ENABLED: boolean;
+
   // Logging
   LOG_LEVEL: string;
 }
@@ -84,6 +87,9 @@ const config: Config = {
   // Ingestion Pipeline
   SEPARATE_COLLECTIONS: process.env.SEPARATE_COLLECTIONS !== 'false',
   LEGACY_CODEBASE_COLLECTION: process.env.LEGACY_CODEBASE_COLLECTION !== 'false',
+
+  // Sparse Vectors
+  SPARSE_VECTORS_ENABLED: process.env.SPARSE_VECTORS_ENABLED === 'true',
 
   // Logging
   LOG_LEVEL: process.env.LOG_LEVEL || 'info',

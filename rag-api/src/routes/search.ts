@@ -21,6 +21,7 @@ import {
 } from '../utils/validation';
 import { buildSearchFilter } from '../utils/filters';
 import { graphStore } from '../services/graph-store';
+import config from '../config';
 
 const router = Router();
 
@@ -104,6 +105,25 @@ router.post('/search-hybrid', validate(searchHybridSchema), asyncHandler(async (
 
   const filter = buildSearchFilter(filters);
 
+  // Native sparse hybrid search (when enabled)
+  if (config.SPARSE_VECTORS_ENABLED) {
+    const { dense, sparse } = await embeddingService.embedFull(query);
+    const results = await vectorStore.searchHybridNative(collection, dense, sparse, limit, filter);
+
+    return res.json({
+      results: results.map(r => ({
+        file: r.payload.file,
+        content: r.payload.content,
+        language: r.payload.language,
+        score: r.score,
+      })),
+      query,
+      mode: 'native-sparse',
+    });
+  }
+
+  // Fallback: client-side weighted fusion (dense + text match)
+
   // 1. Semantic search
   const queryEmbedding = await embeddingService.embed(query);
   const semanticResults = await vectorStore.search(collection, queryEmbedding, limit * 2, filter);
@@ -170,6 +190,7 @@ router.post('/search-hybrid', validate(searchHybridSchema), asyncHandler(async (
     })),
     query,
     semanticWeight,
+    mode: 'text-match-fusion',
   });
 }));
 

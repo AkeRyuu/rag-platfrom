@@ -34,6 +34,14 @@ export function createSearchTools(projectName: string): ToolModule {
             type: "string",
             description: "Filter by path pattern (e.g., 'src/modules/*')",
           },
+          layer: {
+            type: "string",
+            description: "Filter by architectural layer (api, service, util, model, middleware, test, parser, types, config, other)",
+          },
+          service: {
+            type: "string",
+            description: "Filter by service/class name (e.g., 'EmbeddingService')",
+          },
         },
         required: ["query"],
       },
@@ -81,6 +89,14 @@ export function createSearchTools(projectName: string): ToolModule {
             type: "string",
             description: "Filter by language",
           },
+          layer: {
+            type: "string",
+            description: "Filter by architectural layer (api, service, util, etc.)",
+          },
+          service: {
+            type: "string",
+            description: "Filter by service/class name",
+          },
         },
         required: ["query"],
       },
@@ -108,6 +124,14 @@ export function createSearchTools(projectName: string): ToolModule {
           language: {
             type: "string",
             description: "Filter by language",
+          },
+          layer: {
+            type: "string",
+            description: "Filter by architectural layer (api, service, util, etc.)",
+          },
+          service: {
+            type: "string",
+            description: "Filter by service/class name",
           },
         },
         required: ["query"],
@@ -171,17 +195,19 @@ export function createSearchTools(projectName: string): ToolModule {
       args: Record<string, unknown>,
       ctx: ToolContext
     ): Promise<string> => {
-      const { query, limit = 5, language, path } = args as {
+      const { query, limit = 5, language, path, layer, service } = args as {
         query: string;
         limit?: number;
         language?: string;
         path?: string;
+        layer?: string;
+        service?: string;
       };
       const response = await ctx.api.post("/api/search", {
         collection: `${ctx.collectionPrefix}codebase`,
         query,
         limit,
-        filters: { language, path },
+        filters: { language, path, layer, service },
       });
       const results = response.data.results;
       if (!results || results.length === 0) {
@@ -211,18 +237,22 @@ export function createSearchTools(projectName: string): ToolModule {
       args: Record<string, unknown>,
       ctx: ToolContext
     ): Promise<string> => {
-      const { query, groupBy = "file", limit = 10, language } = args as {
+      const { query, groupBy = "file", limit = 10, language, layer, service } = args as {
         query: string;
         groupBy?: string;
         limit?: number;
         language?: string;
+        layer?: string;
+        service?: string;
       };
+      const filters: Record<string, string | undefined> = { language, layer, service };
+      const hasFilters = Object.values(filters).some(v => v !== undefined);
       const response = await ctx.api.post("/api/search-grouped", {
         collection: `${ctx.collectionPrefix}codebase`,
         query,
         groupBy,
         limit,
-        filters: language ? { language } : undefined,
+        filters: hasFilters ? filters : undefined,
       });
       const groups = response.data.groups;
       if (!groups || groups.length === 0) {
@@ -247,18 +277,22 @@ export function createSearchTools(projectName: string): ToolModule {
       args: Record<string, unknown>,
       ctx: ToolContext
     ): Promise<string> => {
-      const { query, limit = 10, semanticWeight = 0.7, language } = args as {
+      const { query, limit = 10, semanticWeight = 0.7, language, layer, service } = args as {
         query: string;
         limit?: number;
         semanticWeight?: number;
         language?: string;
+        layer?: string;
+        service?: string;
       };
+      const filters: Record<string, string | undefined> = { language, layer, service };
+      const hasFilters = Object.values(filters).some(v => v !== undefined);
       const response = await ctx.api.post("/api/search-hybrid", {
         collection: `${ctx.collectionPrefix}codebase`,
         query,
         limit,
         semanticWeight,
-        filters: language ? { language } : undefined,
+        filters: hasFilters ? filters : undefined,
       });
       const results = response.data.results;
       if (!results || results.length === 0) {

@@ -11,11 +11,12 @@
  */
 
 import { vectorStore, SearchResult } from './vector-store';
-import { embeddingService } from './embedding';
+import { embeddingService, SparseVector } from './embedding';
 import { llm } from './llm';
 import { memoryService } from './memory';
 import { graphStore } from './graph-store';
 import { logger } from '../utils/logger';
+import config from '../config';
 import {
   contextPackDuration,
   contextPackTokens,
@@ -83,12 +84,22 @@ class ContextPackBuilder {
       const facets = this.decomposeFacets(query, projectName);
 
       // Step 2: Retrieve per-facet
-      const embedding = await embeddingService.embed(query);
+      let embedding: number[];
+      let sparseEmbedding: SparseVector | undefined;
+
+      if (config.SPARSE_VECTORS_ENABLED) {
+        const full = await embeddingService.embedFull(query);
+        embedding = full.dense;
+        sparseEmbedding = full.sparse;
+      } else {
+        embedding = await embeddingService.embed(query);
+      }
+
       const allChunks: RankedChunk[] = [];
 
       for (const facet of facets) {
         try {
-          const results = await this.retrieveFacet(facet, embedding, query, semanticWeight);
+          const results = await this.retrieveFacet(facet, embedding, query, semanticWeight, sparseEmbedding);
           for (const r of results) {
             allChunks.push({
               file: (r.payload.file as string) || 'unknown',
@@ -244,12 +255,17 @@ class ContextPackBuilder {
     facet: ContextFacet,
     embedding: number[],
     query: string,
-    semanticWeight: number
+    semanticWeight: number,
+    sparseEmbedding?: SparseVector
   ): Promise<SearchResult[]> {
-    // Semantic search
+    // Use native hybrid search if sparse vectors available
+    if (config.SPARSE_VECTORS_ENABLED && sparseEmbedding) {
+      return vectorStore.searchHybridNative(facet.collection, embedding, sparseEmbedding, facet.limit);
+    }
+
+    // Fallback: semantic + text-match fusion
     const semanticResults = await vectorStore.search(facet.collection, embedding, facet.limit * 2);
 
-    // Keyword search
     const keywords = query.toLowerCase().split(/\s+/).filter(w => w.length > 2);
     let keywordResults: SearchResult[] = [];
 
@@ -267,7 +283,6 @@ class ContextPackBuilder {
       }
     }
 
-    // Hybrid fusion
     return this.hybridFusion(semanticResults, keywordResults, semanticWeight, facet.limit);
   }
 

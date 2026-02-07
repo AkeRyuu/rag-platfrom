@@ -24,6 +24,16 @@ export interface EmbedOptions {
   projectName?: string;
 }
 
+export interface SparseVector {
+  indices: number[];
+  values: number[];
+}
+
+export interface FullEmbeddingResult {
+  dense: number[];
+  sparse: SparseVector;
+}
+
 class EmbeddingService {
   private provider: string;
 
@@ -146,6 +156,57 @@ class EmbeddingService {
     recentQueries?: string[];
   }): Promise<{ warmedCount: number }> {
     return cacheService.warmSessionCache(options);
+  }
+
+  /**
+   * Get dense + sparse embedding for a single text.
+   * Only supported with BGE-M3 provider; others return empty sparse.
+   */
+  async embedFull(text: string): Promise<FullEmbeddingResult> {
+    if (this.provider === 'bge-m3-server') {
+      return this.embedFullWithBGE(text);
+    }
+    // Fallback: dense only
+    const dense = await this.embed(text);
+    return { dense, sparse: { indices: [], values: [] } };
+  }
+
+  /**
+   * Get dense + sparse embeddings for a batch of texts.
+   * Only supported with BGE-M3 provider; others return empty sparse.
+   */
+  async embedBatchFull(texts: string[]): Promise<FullEmbeddingResult[]> {
+    if (this.provider === 'bge-m3-server') {
+      return this.embedBatchFullWithBGE(texts);
+    }
+    // Fallback: dense only
+    const embeddings = await this.embedBatch(texts);
+    return embeddings.map(dense => ({ dense, sparse: { indices: [], values: [] } }));
+  }
+
+  private async embedFullWithBGE(text: string): Promise<FullEmbeddingResult> {
+    try {
+      const response = await axios.post(`${config.BGE_M3_URL}/embed/full`, { text });
+      return {
+        dense: response.data.dense,
+        sparse: response.data.sparse,
+      };
+    } catch (error: any) {
+      logger.error('BGE-M3 full embedding failed', { error: error.message });
+      throw error;
+    }
+  }
+
+  private async embedBatchFullWithBGE(texts: string[]): Promise<FullEmbeddingResult[]> {
+    try {
+      const response = await axios.post(`${config.BGE_M3_URL}/embed/batch/full`, { texts });
+      const dense: number[][] = response.data.dense;
+      const sparse: SparseVector[] = response.data.sparse;
+      return dense.map((d, i) => ({ dense: d, sparse: sparse[i] }));
+    } catch (error: any) {
+      logger.error('BGE-M3 batch full embedding failed', { error: error.message });
+      throw error;
+    }
   }
 
   /**

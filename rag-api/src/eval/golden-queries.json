@@ -1,0 +1,294 @@
+{
+  "projectName": "shared-ai-infra",
+  "collection": "shared-ai-infra_codebase",
+  "apiUrl": "http://localhost:3100",
+  "queries": [
+    {
+      "id": "exact-1",
+      "query": "EmbeddingService embed method",
+      "expectedFiles": ["src/services/embedding.ts"],
+      "category": "exact-match",
+      "k": 10
+    },
+    {
+      "id": "exact-2",
+      "query": "VectorStoreService search method",
+      "expectedFiles": ["src/services/vector-store.ts"],
+      "category": "exact-match",
+      "k": 10
+    },
+    {
+      "id": "exact-3",
+      "query": "buildSearchFilter function",
+      "expectedFiles": ["src/utils/filters.ts"],
+      "category": "exact-match",
+      "k": 10
+    },
+    {
+      "id": "exact-4",
+      "query": "indexProject function",
+      "expectedFiles": ["src/services/indexer.ts"],
+      "category": "exact-match",
+      "k": 10
+    },
+    {
+      "id": "exact-5",
+      "query": "ContextPackBuilder build method",
+      "expectedFiles": ["src/services/context-pack.ts"],
+      "category": "exact-match",
+      "k": 10
+    },
+    {
+      "id": "exact-6",
+      "query": "CodeParser parse method",
+      "expectedFiles": ["src/services/parsers/code-parser.ts"],
+      "category": "exact-match",
+      "k": 10
+    },
+    {
+      "id": "exact-7",
+      "query": "memoryService recall",
+      "expectedFiles": ["src/services/memory.ts"],
+      "category": "exact-match",
+      "k": 10
+    },
+    {
+      "id": "exact-8",
+      "query": "graphStore expand",
+      "expectedFiles": ["src/services/graph-store.ts"],
+      "category": "exact-match",
+      "k": 10
+    },
+    {
+      "id": "exact-9",
+      "query": "searchSchema validation",
+      "expectedFiles": ["src/utils/validation.ts"],
+      "category": "exact-match",
+      "k": 10
+    },
+    {
+      "id": "exact-10",
+      "query": "createSearchTools function",
+      "expectedFiles": ["mcp-server/src/tools/search.ts"],
+      "category": "exact-match",
+      "k": 10
+    },
+    {
+      "id": "concept-1",
+      "query": "how does hybrid search combine semantic and keyword results",
+      "expectedFiles": ["src/routes/search.ts", "src/services/context-pack.ts"],
+      "category": "concept",
+      "k": 10
+    },
+    {
+      "id": "concept-2",
+      "query": "how are embeddings cached across sessions",
+      "expectedFiles": ["src/services/embedding.ts", "src/services/cache.ts"],
+      "category": "concept",
+      "k": 10
+    },
+    {
+      "id": "concept-3",
+      "query": "how does the parser registry route files to parsers",
+      "expectedFiles": ["src/services/parsers/index.ts", "src/services/parsers/code-parser.ts"],
+      "category": "concept",
+      "k": 10
+    },
+    {
+      "id": "concept-4",
+      "query": "how does zero-downtime reindexing work with aliases",
+      "expectedFiles": ["src/services/indexer.ts", "src/services/vector-store.ts"],
+      "category": "concept",
+      "k": 10
+    },
+    {
+      "id": "concept-5",
+      "query": "how does context pack builder assemble faceted retrieval",
+      "expectedFiles": ["src/services/context-pack.ts"],
+      "category": "concept",
+      "k": 10
+    },
+    {
+      "id": "concept-6",
+      "query": "how are memory governance and quarantine implemented",
+      "expectedFiles": ["src/services/memory.ts"],
+      "category": "concept",
+      "k": 10
+    },
+    {
+      "id": "concept-7",
+      "query": "how does LLM reranking improve search results",
+      "expectedFiles": ["src/services/context-pack.ts"],
+      "category": "concept",
+      "k": 10
+    },
+    {
+      "id": "concept-8",
+      "query": "what is the incremental indexing strategy for changed files",
+      "expectedFiles": ["src/services/indexer.ts"],
+      "category": "concept",
+      "k": 10
+    },
+    {
+      "id": "concept-9",
+      "query": "how does the MCP tool registry dispatch and enrich tool calls",
+      "expectedFiles": ["mcp-server/src/tool-registry.ts"],
+      "category": "concept",
+      "k": 10
+    },
+    {
+      "id": "concept-10",
+      "query": "how does AST parser extract import edges for the project graph",
+      "expectedFiles": ["src/services/parsers/ast-parser.ts", "src/services/graph-store.ts"],
+      "category": "concept",
+      "k": 10
+    },
+    {
+      "id": "concept-11",
+      "query": "how does the token budget compression select chunks",
+      "expectedFiles": ["src/services/context-pack.ts"],
+      "category": "concept",
+      "k": 10
+    },
+    {
+      "id": "concept-12",
+      "query": "what vector similarity distance metric is used for search",
+      "expectedFiles": ["src/services/vector-store.ts"],
+      "category": "concept",
+      "k": 10
+    },
+    {
+      "id": "concept-13",
+      "query": "how does batch embedding work with BGE-M3 server",
+      "expectedFiles": ["src/services/embedding.ts"],
+      "category": "concept",
+      "k": 10
+    },
+    {
+      "id": "concept-14",
+      "query": "how are Qdrant payload indexes created for filtering",
+      "expectedFiles": ["src/services/vector-store.ts"],
+      "category": "concept",
+      "k": 10
+    },
+    {
+      "id": "concept-15",
+      "query": "how does the Express error handling middleware work",
+      "expectedFiles": ["src/middleware/error-handler.ts", "src/middleware/async-handler.ts"],
+      "category": "concept",
+      "k": 10
+    },
+    {
+      "id": "cross-1",
+      "query": "what happens when a search request comes in from MCP to Qdrant",
+      "expectedFiles": ["mcp-server/src/tools/search.ts", "src/routes/search.ts", "src/services/vector-store.ts"],
+      "category": "cross-file",
+      "k": 10
+    },
+    {
+      "id": "cross-2",
+      "query": "how does file indexing flow from disk to Qdrant collections",
+      "expectedFiles": ["src/services/indexer.ts", "src/services/parsers/code-parser.ts", "src/services/embedding.ts", "src/services/vector-store.ts"],
+      "category": "cross-file",
+      "k": 10
+    },
+    {
+      "id": "cross-3",
+      "query": "how does the memory remember and recall pipeline work end to end",
+      "expectedFiles": ["mcp-server/src/tools/memory.ts", "src/routes/memory.ts", "src/services/memory.ts"],
+      "category": "cross-file",
+      "k": 10
+    },
+    {
+      "id": "cross-4",
+      "query": "how do validation schemas connect to route handlers",
+      "expectedFiles": ["src/utils/validation.ts", "src/routes/search.ts"],
+      "category": "cross-file",
+      "k": 10
+    },
+    {
+      "id": "cross-5",
+      "query": "how does graph expansion enhance search results across services",
+      "expectedFiles": ["src/services/graph-store.ts", "src/routes/search.ts", "src/services/context-pack.ts"],
+      "category": "cross-file",
+      "k": 10
+    },
+    {
+      "id": "cross-6",
+      "query": "how do tool usage tracking events flow from MCP to Qdrant",
+      "expectedFiles": ["mcp-server/src/tool-registry.ts", "src/services/usage-tracker.ts"],
+      "category": "cross-file",
+      "k": 10
+    },
+    {
+      "id": "cross-7",
+      "query": "how do search filters flow from MCP tool params to Qdrant query",
+      "expectedFiles": ["mcp-server/src/tools/search.ts", "src/utils/filters.ts", "src/services/vector-store.ts"],
+      "category": "cross-file",
+      "k": 10
+    },
+    {
+      "id": "cross-8",
+      "query": "how does the config parser handle YAML and JSON files differently from code",
+      "expectedFiles": ["src/services/parsers/config-parser.ts", "src/services/parsers/code-parser.ts", "src/services/parsers/index.ts"],
+      "category": "cross-file",
+      "k": 10
+    },
+    {
+      "id": "cross-9",
+      "query": "how does the MCP server register and dispatch all tool modules",
+      "expectedFiles": ["mcp-server/src/index.ts", "mcp-server/src/tool-registry.ts"],
+      "category": "cross-file",
+      "k": 10
+    },
+    {
+      "id": "cross-10",
+      "query": "how does collection routing work for typed vs legacy collections in the indexer",
+      "expectedFiles": ["src/services/indexer.ts", "src/config.ts"],
+      "category": "cross-file",
+      "k": 10
+    },
+    {
+      "id": "config-1",
+      "query": "what embedding providers are supported and how to configure them",
+      "expectedFiles": ["src/config.ts", "src/services/embedding.ts"],
+      "category": "config-docs",
+      "k": 10
+    },
+    {
+      "id": "config-2",
+      "query": "how to set up MCP server for a new project",
+      "expectedFiles": ["mcp-server/src/index.ts"],
+      "category": "config-docs",
+      "k": 10
+    },
+    {
+      "id": "config-3",
+      "query": "what environment variables control the RAG API behavior",
+      "expectedFiles": ["src/config.ts"],
+      "category": "config-docs",
+      "k": 10
+    },
+    {
+      "id": "config-4",
+      "query": "docker compose services and ports configuration",
+      "expectedFiles": ["docker/docker-compose.yml"],
+      "category": "config-docs",
+      "k": 10
+    },
+    {
+      "id": "config-5",
+      "query": "what Qdrant payload fields are indexed for filtering",
+      "expectedFiles": ["src/services/vector-store.ts"],
+      "category": "config-docs",
+      "k": 10
+    },
+    {
+      "id": "config-6",
+      "query": "how to configure separate vs legacy collection routing",
+      "expectedFiles": ["src/config.ts", "src/services/indexer.ts"],
+      "category": "config-docs",
+      "k": 10
+    }
+  ]
+}

@@ -1,8 +1,9 @@
 /**
- * Code Parser - Regex-based function/class boundary detection with symbol extraction.
+ * Code Parser - AST-based (ts-morph) for TS/JS, regex fallback for other languages.
  */
 
 import * as path from 'path';
+import { Project } from 'ts-morph';
 import type { FileParser, ParsedChunk } from './base-parser';
 
 const CODE_EXTENSIONS = new Set([
@@ -11,7 +12,9 @@ const CODE_EXTENSIONS = new Set([
   '.scala', '.sh', '.bash',
 ]);
 
-// Patterns for function/class boundaries
+const TS_JS_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx']);
+
+// Patterns for function/class boundaries (non-TS/JS fallback)
 const BOUNDARY_PATTERNS = [
   // TypeScript/JavaScript
   /^(?:export\s+)?(?:async\s+)?function\s+\w+/,
@@ -77,21 +80,175 @@ export class CodeParser implements FileParser {
   }
 
   parse(content: string, filePath: string): ParsedChunk[] {
+    const ext = path.extname(filePath).toLowerCase();
+
+    // Use ts-morph AST for TypeScript/JavaScript files
+    if (TS_JS_EXTENSIONS.has(ext)) {
+      try {
+        const chunks = this.parseTypeScript(content, filePath);
+        if (chunks.length > 0) return chunks;
+      } catch {
+        // Fall through to regex parser on AST failure
+      }
+    }
+
+    // Regex-based fallback for other languages or AST failure
+    return this.parseWithRegex(content, filePath);
+  }
+
+  /**
+   * AST-based parsing for TypeScript/JavaScript using ts-morph.
+   * Extracts classes, functions, interfaces, type aliases, and enums as separate chunks.
+   */
+  private parseTypeScript(content: string, filePath: string): ParsedChunk[] {
+    const language = getLanguage(filePath);
+    const project = new Project({ useInMemoryFileSystem: true, compilerOptions: { allowJs: true } });
+    const ext = path.extname(filePath).toLowerCase();
+    const tempName = ext === '.jsx' ? 'temp.tsx' : `temp${ext}`;
+    const sourceFile = project.createSourceFile(tempName, content);
+
+    const chunks: ParsedChunk[] = [];
+
+    // Extract file-level imports
+    const imports = sourceFile.getImportDeclarations().map(i => i.getModuleSpecifierValue());
+
+    // Extract classes with their methods
+    for (const cls of sourceFile.getClasses()) {
+      const name = cls.getName() || 'anonymous';
+      const methods = cls.getMethods().map(m => m.getName());
+      const jsdoc = cls.getJsDocs().map(d => d.getDescription()).filter(Boolean).join('\n');
+
+      chunks.push({
+        content: cls.getFullText(),
+        startLine: cls.getStartLineNumber(),
+        endLine: cls.getEndLineNumber(),
+        language,
+        type: 'code',
+        symbols: [name, ...methods],
+        imports: chunks.length === 0 ? imports : undefined,
+        metadata: {
+          kind: 'class',
+          extends: cls.getExtends()?.getText(),
+          implements: cls.getImplements().map(i => i.getText()),
+          exported: cls.isExported(),
+          ...(jsdoc ? { jsdoc } : {}),
+        },
+      });
+    }
+
+    // Extract standalone functions
+    for (const fn of sourceFile.getFunctions()) {
+      const name = fn.getName() || 'anonymous';
+      const jsdoc = fn.getJsDocs().map(d => d.getDescription()).filter(Boolean).join('\n');
+
+      chunks.push({
+        content: fn.getFullText(),
+        startLine: fn.getStartLineNumber(),
+        endLine: fn.getEndLineNumber(),
+        language,
+        type: 'code',
+        symbols: [name],
+        imports: chunks.length === 0 ? imports : undefined,
+        metadata: {
+          kind: 'function',
+          exported: fn.isExported(),
+          ...(jsdoc ? { jsdoc } : {}),
+        },
+      });
+    }
+
+    // Extract interfaces
+    for (const iface of sourceFile.getInterfaces()) {
+      chunks.push({
+        content: iface.getFullText(),
+        startLine: iface.getStartLineNumber(),
+        endLine: iface.getEndLineNumber(),
+        language,
+        type: 'code',
+        symbols: [iface.getName()],
+        imports: chunks.length === 0 ? imports : undefined,
+        metadata: { kind: 'interface', exported: iface.isExported() },
+      });
+    }
+
+    // Extract type aliases
+    for (const ta of sourceFile.getTypeAliases()) {
+      chunks.push({
+        content: ta.getFullText(),
+        startLine: ta.getStartLineNumber(),
+        endLine: ta.getEndLineNumber(),
+        language,
+        type: 'code',
+        symbols: [ta.getName()],
+        imports: chunks.length === 0 ? imports : undefined,
+        metadata: { kind: 'type', exported: ta.isExported() },
+      });
+    }
+
+    // Extract enums
+    for (const en of sourceFile.getEnums()) {
+      chunks.push({
+        content: en.getFullText(),
+        startLine: en.getStartLineNumber(),
+        endLine: en.getEndLineNumber(),
+        language,
+        type: 'code',
+        symbols: [en.getName()],
+        imports: chunks.length === 0 ? imports : undefined,
+        metadata: { kind: 'enum', exported: en.isExported() },
+      });
+    }
+
+    // Extract top-level variable declarations (arrow functions, consts)
+    for (const vs of sourceFile.getVariableStatements()) {
+      for (const decl of vs.getDeclarations()) {
+        const init = decl.getInitializer();
+        if (!init) continue;
+        const text = init.getText();
+        // Only create separate chunks for arrow functions or significant declarations
+        if (text.includes('=>') || text.includes('function') || text.length > 100) {
+          const name = decl.getName();
+          // Skip if already captured by a class/function chunk
+          if (chunks.some(c => c.symbols?.includes(name))) continue;
+
+          chunks.push({
+            content: vs.getFullText(),
+            startLine: vs.getStartLineNumber(),
+            endLine: vs.getEndLineNumber(),
+            language,
+            type: 'code',
+            symbols: [name],
+            imports: chunks.length === 0 ? imports : undefined,
+            metadata: { kind: 'variable', exported: vs.isExported() },
+          });
+        }
+      }
+    }
+
+    // If first chunk doesn't have imports, add them
+    if (chunks.length > 0 && !chunks[0].imports) {
+      chunks[0].imports = imports;
+    }
+
+    return chunks;
+  }
+
+  /**
+   * Regex-based parsing (fallback for non-TS/JS or AST failures).
+   */
+  private parseWithRegex(content: string, filePath: string): ParsedChunk[] {
     const language = getLanguage(filePath);
     const lines = content.split('\n');
 
-    // Extract symbols and imports for the whole file
     const allSymbols = this.extractSymbols(content);
     const allImports = this.extractImports(content);
 
-    // Try boundary-based chunking first
     const boundaries = this.findBoundaries(lines);
 
     if (boundaries.length >= 2) {
       return this.chunkByBoundaries(lines, boundaries, language, allSymbols, allImports);
     }
 
-    // Fallback: line-based chunking (similar to existing chunkCode)
     return this.chunkByLines(lines, language, allSymbols, allImports);
   }
 
@@ -101,7 +258,6 @@ export class CodeParser implements FileParser {
     for (let i = 0; i < lines.length; i++) {
       const trimmed = lines[i].trimStart();
       if (BOUNDARY_PATTERNS.some(p => p.test(trimmed))) {
-        // Don't add if too close to previous boundary
         const last = boundaries[boundaries.length - 1];
         if (i - last >= 5) {
           boundaries.push(i);
@@ -129,7 +285,6 @@ export class CodeParser implements FileParser {
 
       if (chunkContent.trim().length < 10) continue;
 
-      // Extract symbols specific to this chunk
       const chunkSymbols = this.extractSymbols(chunkContent);
 
       chunks.push({
@@ -139,7 +294,7 @@ export class CodeParser implements FileParser {
         language,
         type: 'code',
         symbols: chunkSymbols.length > 0 ? chunkSymbols : undefined,
-        imports: i === 0 ? allImports : undefined, // imports only in first chunk
+        imports: i === 0 ? allImports : undefined,
       });
     }
 

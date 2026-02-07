@@ -19,6 +19,20 @@ export interface SearchResult {
   payload: Record<string, unknown>;
 }
 
+export interface SparseVectorData {
+  indices: number[];
+  values: number[];
+}
+
+export interface SparseVectorPoint {
+  id?: string;
+  vectors: {
+    dense: number[];
+    sparse: SparseVectorData;
+  };
+  payload: Record<string, unknown>;
+}
+
 export interface CollectionInfo {
   name: string;
   vectorsCount: number;
@@ -47,6 +61,9 @@ const INDEXED_FIELDS: Array<{ fieldName: string; type: 'keyword' | 'integer' | '
   { fieldName: 'fromFile', type: 'keyword' },
   { fieldName: 'toFile', type: 'keyword' },
   { fieldName: 'edgeType', type: 'keyword' },
+  { fieldName: 'layer', type: 'keyword' },
+  { fieldName: 'service', type: 'keyword' },
+  { fieldName: 'gitCommit', type: 'keyword' },
 ];
 
 class VectorStoreService {
@@ -57,7 +74,6 @@ class VectorStoreService {
     this.client = new QdrantClient({
       url: config.QDRANT_URL,
       apiKey: config.QDRANT_API_KEY,
-      checkCompatibility: false, // Skip version check (server v1.7.4)
     });
   }
 
@@ -237,6 +253,190 @@ class VectorStoreService {
     });
 
     logger.debug(`Upserted ${points.length} points to ${collection}`);
+  }
+
+  /**
+   * Ensure a collection exists with named vectors (dense + sparse).
+   */
+  async ensureCollectionWithSparse(name: string): Promise<void> {
+    try {
+      const collections = await this.client.getCollections();
+      const exists = collections.collections.some(c => c.name === name);
+
+      if (!exists) {
+        await this.client.createCollection(name, {
+          vectors: {
+            dense: {
+              size: config.VECTOR_SIZE,
+              distance: 'Cosine',
+            },
+          },
+          sparse_vectors: {
+            sparse: {},
+          },
+          optimizers_config: {
+            default_segment_number: 2,
+          },
+        });
+        logger.info(`Created sparse collection: ${name}`);
+        await this.createPayloadIndexes(name);
+      }
+    } catch (error) {
+      logger.error(`Failed to ensure sparse collection: ${name}`, { error });
+      throw error;
+    }
+  }
+
+  /**
+   * Upsert vectors with named dense + sparse vectors.
+   */
+  async upsertSparse(collection: string, points: SparseVectorPoint[]): Promise<void> {
+    await this.ensureCollectionWithSparse(collection);
+
+    const formattedPoints = points.map(p => ({
+      id: p.id || uuidv4(),
+      vector: {
+        dense: p.vectors.dense,
+        sparse: {
+          indices: p.vectors.sparse.indices,
+          values: p.vectors.sparse.values,
+        },
+      },
+      payload: p.payload,
+    }));
+
+    await this.client.upsert(collection, {
+      wait: true,
+      points: formattedPoints,
+    });
+
+    logger.debug(`Upserted ${points.length} sparse points to ${collection}`);
+  }
+
+  /**
+   * Native hybrid search using Qdrant Query API with prefetch + RRF fusion.
+   * Requires Qdrant v1.10+ and @qdrant/js-client-rest ^1.10.0.
+   *
+   * Falls back to client-side RRF with two separate searches if the Query API
+   * is not available.
+   */
+  async searchHybridNative(
+    collection: string,
+    denseVector: number[],
+    sparseVector: SparseVectorData,
+    limit: number = 10,
+    filter?: Record<string, unknown>
+  ): Promise<SearchResult[]> {
+    try {
+      // Try native Query API with prefetch + RRF fusion
+      const response = await (this.client as any).query(collection, {
+        prefetch: [
+          {
+            query: { name: 'dense', vector: denseVector },
+            using: 'dense',
+            limit: limit * 2,
+            ...(filter ? { filter: filter as any } : {}),
+          },
+          {
+            query: {
+              name: 'sparse',
+              vector: {
+                indices: sparseVector.indices,
+                values: sparseVector.values,
+              },
+            },
+            using: 'sparse',
+            limit: limit * 2,
+            ...(filter ? { filter: filter as any } : {}),
+          },
+        ],
+        query: { fusion: 'rrf' },
+        limit,
+        with_payload: true,
+      });
+
+      const points = response.points || response;
+      return (Array.isArray(points) ? points : []).map((r: any) => ({
+        id: r.id as string,
+        score: r.score,
+        payload: r.payload as Record<string, unknown>,
+      }));
+    } catch (error: any) {
+      logger.debug('Native Query API unavailable, falling back to client-side RRF', {
+        error: error.message,
+      });
+      return this.searchHybridClientSideRRF(collection, denseVector, sparseVector, limit, filter);
+    }
+  }
+
+  /**
+   * Client-side RRF fallback: two separate searches + Reciprocal Rank Fusion.
+   */
+  private async searchHybridClientSideRRF(
+    collection: string,
+    denseVector: number[],
+    sparseVector: SparseVectorData,
+    limit: number,
+    filter?: Record<string, unknown>
+  ): Promise<SearchResult[]> {
+    const k = 60; // RRF constant
+
+    // Dense search (try named vector first, fall back to anonymous)
+    let denseResults: SearchResult[] = [];
+    try {
+      denseResults = await this.search(collection, denseVector, limit * 2, filter);
+    } catch {
+      // Collection might not support this vector config
+    }
+
+    // Sparse search (using named vector)
+    let sparseResults: SearchResult[] = [];
+    try {
+      const response = await this.client.search(collection, {
+        vector: {
+          name: 'sparse',
+          vector: {
+            indices: sparseVector.indices,
+            values: sparseVector.values,
+          },
+        } as any,
+        limit: limit * 2,
+        with_payload: true,
+        filter: filter as any,
+      });
+      sparseResults = response.map(r => ({
+        id: r.id as string,
+        score: r.score,
+        payload: r.payload as Record<string, unknown>,
+      }));
+    } catch {
+      // Sparse search may not be available
+    }
+
+    // RRF fusion
+    const scores = new Map<string, { score: number; result: SearchResult }>();
+
+    for (let i = 0; i < denseResults.length; i++) {
+      const r = denseResults[i];
+      const rrfScore = 1 / (k + i + 1);
+      scores.set(r.id, { score: rrfScore, result: r });
+    }
+
+    for (let i = 0; i < sparseResults.length; i++) {
+      const r = sparseResults[i];
+      const rrfScore = 1 / (k + i + 1);
+      const existing = scores.get(r.id);
+      if (existing) {
+        existing.score += rrfScore;
+      } else {
+        scores.set(r.id, { score: rrfScore, result: r });
+      }
+    }
+
+    return Array.from(scores.values())
+      .sort((a, b) => b.score - a.score)
+      .slice(0, limit)
+      .map(({ score, result }) => ({ ...result, score }));
   }
 
   /**

@@ -5,6 +5,8 @@
 export interface SearchFilters {
   language?: string;
   path?: string;
+  layer?: string;
+  service?: string;
 }
 
 interface QdrantCondition {
@@ -27,6 +29,14 @@ export function buildSearchFilter(filters?: SearchFilters): Record<string, unkno
 
   if (filters.path) {
     conditions.push({ key: 'file', match: { text: filters.path } });
+  }
+
+  if (filters.layer) {
+    conditions.push({ key: 'layer', match: { value: filters.layer } });
+  }
+
+  if (filters.service) {
+    conditions.push({ key: 'service', match: { value: filters.service } });
   }
 
   return conditions.length > 0 ? { must: conditions } : undefined;

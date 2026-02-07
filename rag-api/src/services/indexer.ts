@@ -5,7 +5,8 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
-import { vectorStore, VectorPoint } from './vector-store';
+import { execSync } from 'child_process';
+import { vectorStore, VectorPoint, SparseVectorPoint } from './vector-store';
 import { embeddingService } from './embedding';
 import { cacheService } from './cache';
 import { logger } from '../utils/logger';
@@ -14,6 +15,7 @@ import config from '../config';
 import { indexingChunksByType } from '../utils/metrics';
 import { astParser } from './parsers/ast-parser';
 import { graphStore } from './graph-store';
+import { buildAnchorString } from './anchor';
 
 export interface IndexOptions {
   projectName: string;
@@ -222,6 +224,45 @@ function walkDirectory(
 }
 
 /**
+ * Get the current git commit hash for the project.
+ */
+function getGitCommit(projectPath: string): string | null {
+  try {
+    return execSync('git rev-parse --short HEAD', { cwd: projectPath, encoding: 'utf-8' }).trim();
+  } catch { return null; }
+}
+
+/**
+ * Detect the architectural layer from the file path.
+ */
+function detectLayer(filePath: string): string {
+  const p = filePath.toLowerCase().replace(/\\/g, '/');
+  if (/\broutes?\b|\bcontrollers?\b/.test(p)) return 'api';
+  if (/\bservices?\b/.test(p)) return 'service';
+  if (/\butils?\b|\bhelpers?\b|\blib\b/.test(p)) return 'util';
+  if (/\bmodels?\b|\bentit/.test(p)) return 'model';
+  if (/\bmiddleware\b/.test(p)) return 'middleware';
+  if (/\b__tests__\b|\btest\b|\bspec\b/.test(p)) return 'test';
+  if (/\bparsers?\b/.test(p)) return 'parser';
+  if (/\btypes?\b|\binterfaces?\b/.test(p)) return 'types';
+  if (/\bconfig\b/.test(p)) return 'config';
+  return 'other';
+}
+
+/**
+ * Extract a service/class name from symbols or file path.
+ */
+function extractServiceName(symbols: string[] | undefined): string | null {
+  if (symbols?.length) {
+    const svc = symbols.find(s => /Service|Store|Parser|Builder|Handler|Controller|Manager/i.test(s));
+    if (svc) return svc;
+    const cls = symbols.find(s => /^[A-Z][a-zA-Z]+$/.test(s));
+    if (cls) return cls;
+  }
+  return null;
+}
+
+/**
  * Index a project's codebase
  */
 export async function indexProject(options: IndexOptions): Promise<IndexStats> {
@@ -338,9 +379,13 @@ export async function indexProject(options: IndexOptions): Promise<IndexStats> {
         symbols?: string[];
         imports?: string[];
         chunkType?: string;
+        layer?: string;
+        service?: string | null;
+        gitCommit?: string | null;
       }
       const allChunks: ChunkInfo[] = [];
       const processedFiles: string[] = [];
+      const gitCommit = getGitCommit(projectPath);
 
       for (const filePath of fileBatch) {
         try {
@@ -391,6 +436,9 @@ export async function indexProject(options: IndexOptions): Promise<IndexStats> {
               symbols: pc.symbols,
               imports: pc.imports,
               chunkType: fileType,
+              layer: detectLayer(relativePath),
+              service: extractServiceName(pc.symbols),
+              gitCommit,
             });
 
             indexingChunksByType.inc({ project: projectName, chunk_type: fileType });
@@ -425,62 +473,105 @@ export async function indexProject(options: IndexOptions): Promise<IndexStats> {
       // Batch embed all chunks for this file batch
       if (allChunks.length > 0) {
         const points: VectorPoint[] = [];
+        const sparsePoints: SparseVectorPoint[] = [];
+
+        // Build anchor-prefixed texts for embedding
+        const buildAnchoredTexts = (batch: typeof allChunks) =>
+          batch.map(c => {
+            const anchor = buildAnchorString({
+              filePath: c.relativePath,
+              language: c.language,
+              chunkType: c.chunkType || 'code',
+              symbols: c.symbols,
+              imports: c.imports,
+              layer: c.layer,
+              service: c.service || undefined,
+              startLine: c.startLine,
+              endLine: c.endLine,
+            });
+            return anchor + '\n' + c.text;
+          });
+
+        const buildPayload = (chunk: typeof allChunks[0]) => ({
+          file: chunk.relativePath,
+          content: chunk.text,
+          language: chunk.language,
+          chunkIndex: chunk.chunkIndex,
+          totalChunks: chunk.totalChunks,
+          project: projectName,
+          indexedAt: new Date().toISOString(),
+          fileHash: chunk.hash,
+          startLine: chunk.startLine,
+          endLine: chunk.endLine,
+          symbols: chunk.symbols,
+          imports: chunk.imports,
+          chunkType: chunk.chunkType,
+          layer: chunk.layer,
+          service: chunk.service,
+          gitCommit: chunk.gitCommit,
+        });
 
         // Process embeddings in batches
         for (let j = 0; j < allChunks.length; j += embeddingBatchSize) {
           const chunkBatch = allChunks.slice(j, j + embeddingBatchSize);
-          const texts = chunkBatch.map(c => c.text);
+          const textsForEmbedding = buildAnchoredTexts(chunkBatch);
 
           try {
-            // Use batch embedding for efficiency
-            const embeddings = await embeddingService.embedBatch(texts);
-
-            for (let k = 0; k < chunkBatch.length; k++) {
-              const chunk = chunkBatch[k];
-              points.push({
-                vector: embeddings[k],
-                payload: {
-                  file: chunk.relativePath,
-                  content: chunk.text,
-                  language: chunk.language,
-                  chunkIndex: chunk.chunkIndex,
-                  totalChunks: chunk.totalChunks,
-                  project: projectName,
-                  indexedAt: new Date().toISOString(),
-                  fileHash: chunk.hash,
-                  startLine: chunk.startLine,
-                  endLine: chunk.endLine,
-                  symbols: chunk.symbols,
-                  imports: chunk.imports,
-                  chunkType: chunk.chunkType,
-                },
-              });
-              stats.totalChunks++;
+            if (config.SPARSE_VECTORS_ENABLED) {
+              const fullEmbeddings = await embeddingService.embedBatchFull(textsForEmbedding);
+              for (let k = 0; k < chunkBatch.length; k++) {
+                const chunk = chunkBatch[k];
+                sparsePoints.push({
+                  vectors: {
+                    dense: fullEmbeddings[k].dense,
+                    sparse: fullEmbeddings[k].sparse,
+                  },
+                  payload: buildPayload(chunk),
+                });
+                // Also build a dense-only point for legacy/typed collections
+                points.push({
+                  vector: fullEmbeddings[k].dense,
+                  payload: buildPayload(chunk),
+                });
+                stats.totalChunks++;
+              }
+            } else {
+              const embeddings = await embeddingService.embedBatch(textsForEmbedding);
+              for (let k = 0; k < chunkBatch.length; k++) {
+                const chunk = chunkBatch[k];
+                points.push({
+                  vector: embeddings[k],
+                  payload: buildPayload(chunk),
+                });
+                stats.totalChunks++;
+              }
             }
           } catch (error) {
             logger.error(`Batch embedding failed, falling back to sequential`, { error });
-            // Fallback to sequential embedding
             for (const chunk of chunkBatch) {
               try {
-                const embedding = await embeddingService.embed(chunk.text);
-                points.push({
-                  vector: embedding,
-                  payload: {
-                    file: chunk.relativePath,
-                    content: chunk.text,
-                    language: chunk.language,
-                    chunkIndex: chunk.chunkIndex,
-                    totalChunks: chunk.totalChunks,
-                    project: projectName,
-                    indexedAt: new Date().toISOString(),
-                    fileHash: chunk.hash,
-                    startLine: chunk.startLine,
-                    endLine: chunk.endLine,
-                    symbols: chunk.symbols,
-                    imports: chunk.imports,
-                    chunkType: chunk.chunkType,
-                  },
+                const anchor = buildAnchorString({
+                  filePath: chunk.relativePath,
+                  language: chunk.language,
+                  chunkType: chunk.chunkType || 'code',
+                  symbols: chunk.symbols,
+                  imports: chunk.imports,
+                  layer: chunk.layer,
+                  service: chunk.service || undefined,
                 });
+                const anchoredText = anchor + '\n' + chunk.text;
+
+                if (config.SPARSE_VECTORS_ENABLED) {
+                  const full = await embeddingService.embedFull(anchoredText);
+                  sparsePoints.push({
+                    vectors: { dense: full.dense, sparse: full.sparse },
+                    payload: buildPayload(chunk),
+                  });
+                  points.push({ vector: full.dense, payload: buildPayload(chunk) });
+                } else {
+                  const embedding = await embeddingService.embed(anchoredText);
+                  points.push({ vector: embedding, payload: buildPayload(chunk) });
+                }
                 stats.totalChunks++;
               } catch (embError) {
                 logger.warn(`Failed to embed chunk`, { error: embError });
@@ -491,26 +582,31 @@ export async function indexProject(options: IndexOptions): Promise<IndexStats> {
         }
 
         // Upsert batch
-        if (points.length > 0) {
-          // Legacy collection (backward compat)
+        if (config.SPARSE_VECTORS_ENABLED && sparsePoints.length > 0) {
+          // Sparse-enabled collection uses named vectors
+          if (config.LEGACY_CODEBASE_COLLECTION) {
+            await vectorStore.upsertSparse(collectionName, sparsePoints);
+          }
+        } else if (points.length > 0) {
+          // Dense-only path (legacy)
           if (config.LEGACY_CODEBASE_COLLECTION) {
             await vectorStore.upsert(collectionName, points);
           }
+        }
 
-          // Route to typed collections
-          if (config.SEPARATE_COLLECTIONS) {
-            const typeMap: Record<string, VectorPoint[]> = {};
-            for (const point of points) {
-              const ct = (point.payload as Record<string, unknown>).chunkType as string;
-              if (ct && ct !== 'unknown') {
-                if (!typeMap[ct]) typeMap[ct] = [];
-                typeMap[ct].push(point);
-              }
+        // Route to typed collections (always dense-only for typed collections)
+        if (config.SEPARATE_COLLECTIONS && points.length > 0) {
+          const typeMap: Record<string, VectorPoint[]> = {};
+          for (const point of points) {
+            const ct = (point.payload as Record<string, unknown>).chunkType as string;
+            if (ct && ct !== 'unknown') {
+              if (!typeMap[ct]) typeMap[ct] = [];
+              typeMap[ct].push(point);
             }
-            for (const [type, pts] of Object.entries(typeMap)) {
-              const typedCollection = `${projectName}_${type}`;
-              await vectorStore.upsert(typedCollection, pts);
-            }
+          }
+          for (const [type, pts] of Object.entries(typeMap)) {
+            const typedCollection = `${projectName}_${type}`;
+            await vectorStore.upsert(typedCollection, pts);
           }
         }
       }
@@ -659,6 +755,7 @@ export async function reindexWithZeroDowntime(options: ReindexOptions): Promise<
     // Process files in batches with batch embedding
     const fileBatchSize = 20;
     const embeddingBatchSize = 100;
+    const gitCommit = getGitCommit(projectPath);
 
     for (let i = 0; i < allFiles.length; i += fileBatchSize) {
       const fileBatch = allFiles.slice(i, i + fileBatchSize);
@@ -674,6 +771,9 @@ export async function reindexWithZeroDowntime(options: ReindexOptions): Promise<
         symbols?: string[];
         imports?: string[];
         chunkType?: string;
+        layer?: string;
+        service?: string | null;
+        gitCommit?: string | null;
       }
       const allChunks: ChunkInfo[] = [];
 
@@ -723,6 +823,9 @@ export async function reindexWithZeroDowntime(options: ReindexOptions): Promise<
               symbols: pc.symbols,
               imports: pc.imports,
               chunkType: fileType,
+              layer: detectLayer(relativePath),
+              service: extractServiceName(pc.symbols),
+              gitCommit,
             });
 
             indexingChunksByType.inc({ project: projectName, chunk_type: fileType });
@@ -748,34 +851,65 @@ export async function reindexWithZeroDowntime(options: ReindexOptions): Promise<
       // Batch embed all chunks
       if (allChunks.length > 0) {
         const points: VectorPoint[] = [];
+        const sparsePoints: SparseVectorPoint[] = [];
+
+        const buildAnchoredTexts = (batch: typeof allChunks) =>
+          batch.map(c => {
+            const anchor = buildAnchorString({
+              filePath: c.relativePath,
+              language: c.language,
+              chunkType: c.chunkType || 'code',
+              symbols: c.symbols,
+              imports: c.imports,
+              layer: c.layer,
+              service: c.service || undefined,
+              startLine: c.startLine,
+              endLine: c.endLine,
+            });
+            return anchor + '\n' + c.text;
+          });
+
+        const buildPayload = (chunk: typeof allChunks[0]) => ({
+          file: chunk.relativePath,
+          content: chunk.text,
+          language: chunk.language,
+          chunkIndex: chunk.chunkIndex,
+          totalChunks: chunk.totalChunks,
+          startLine: chunk.startLine,
+          endLine: chunk.endLine,
+          project: projectName,
+          indexedAt: new Date().toISOString(),
+          symbols: chunk.symbols,
+          imports: chunk.imports,
+          chunkType: chunk.chunkType,
+          layer: chunk.layer,
+          service: chunk.service,
+          gitCommit: chunk.gitCommit,
+        });
 
         for (let j = 0; j < allChunks.length; j += embeddingBatchSize) {
           const chunkBatch = allChunks.slice(j, j + embeddingBatchSize);
-          const texts = chunkBatch.map(c => c.text);
+          const textsForEmbedding = buildAnchoredTexts(chunkBatch);
 
           try {
-            const embeddings = await embeddingService.embedBatch(texts);
-
-            for (let k = 0; k < chunkBatch.length; k++) {
-              const chunk = chunkBatch[k];
-              points.push({
-                vector: embeddings[k],
-                payload: {
-                  file: chunk.relativePath,
-                  content: chunk.text,
-                  language: chunk.language,
-                  chunkIndex: chunk.chunkIndex,
-                  totalChunks: chunk.totalChunks,
-                  startLine: chunk.startLine,
-                  endLine: chunk.endLine,
-                  project: projectName,
-                  indexedAt: new Date().toISOString(),
-                  symbols: chunk.symbols,
-                  imports: chunk.imports,
-                  chunkType: chunk.chunkType,
-                },
-              });
-              stats.totalChunks++;
+            if (config.SPARSE_VECTORS_ENABLED) {
+              const fullEmbeddings = await embeddingService.embedBatchFull(textsForEmbedding);
+              for (let k = 0; k < chunkBatch.length; k++) {
+                const chunk = chunkBatch[k];
+                sparsePoints.push({
+                  vectors: { dense: fullEmbeddings[k].dense, sparse: fullEmbeddings[k].sparse },
+                  payload: buildPayload(chunk),
+                });
+                points.push({ vector: fullEmbeddings[k].dense, payload: buildPayload(chunk) });
+                stats.totalChunks++;
+              }
+            } else {
+              const embeddings = await embeddingService.embedBatch(textsForEmbedding);
+              for (let k = 0; k < chunkBatch.length; k++) {
+                const chunk = chunkBatch[k];
+                points.push({ vector: embeddings[k], payload: buildPayload(chunk) });
+                stats.totalChunks++;
+              }
             }
           } catch (error) {
             logger.error(`Batch embedding failed`, { error });
@@ -783,24 +917,26 @@ export async function reindexWithZeroDowntime(options: ReindexOptions): Promise<
           }
         }
 
-        // Upsert to NEW collection (legacy)
-        if (points.length > 0) {
+        // Upsert to NEW collection
+        if (config.SPARSE_VECTORS_ENABLED && sparsePoints.length > 0) {
+          await vectorStore.upsertSparse(newCollectionName, sparsePoints);
+        } else if (points.length > 0) {
           await vectorStore.upsert(newCollectionName, points);
+        }
 
-          // Also route to typed collections
-          if (config.SEPARATE_COLLECTIONS) {
-            const typeMap: Record<string, VectorPoint[]> = {};
-            for (const point of points) {
-              const ct = (point.payload as Record<string, unknown>).chunkType as string;
-              if (ct && ct !== 'unknown') {
-                if (!typeMap[ct]) typeMap[ct] = [];
-                typeMap[ct].push(point);
-              }
+        // Route to typed collections (dense-only)
+        if (config.SEPARATE_COLLECTIONS && points.length > 0) {
+          const typeMap: Record<string, VectorPoint[]> = {};
+          for (const point of points) {
+            const ct = (point.payload as Record<string, unknown>).chunkType as string;
+            if (ct && ct !== 'unknown') {
+              if (!typeMap[ct]) typeMap[ct] = [];
+              typeMap[ct].push(point);
             }
-            for (const [type, pts] of Object.entries(typeMap)) {
-              const typedCollection = `${projectName}_${type}`;
-              await vectorStore.upsert(typedCollection, pts);
-            }
+          }
+          for (const [type, pts] of Object.entries(typeMap)) {
+            const typedCollection = `${projectName}_${type}`;
+            await vectorStore.upsert(typedCollection, pts);
           }
         }
       }

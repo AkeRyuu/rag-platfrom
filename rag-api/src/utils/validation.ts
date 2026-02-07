@@ -28,6 +28,8 @@ export const searchSchema = z.object({
   filters: z.object({
     language: z.string().optional(),
     path: z.string().optional(),
+    layer: z.string().optional(),
+    service: z.string().optional(),
   }).optional(),
 });
 
@@ -152,6 +154,8 @@ export const searchGroupedSchema = z.object({
   filters: z.object({
     language: z.string().optional(),
     path: z.string().optional(),
+    layer: z.string().optional(),
+    service: z.string().optional(),
   }).optional(),
   scoreThreshold: z.number().min(0).max(1).optional(),
 });
@@ -164,6 +168,8 @@ export const searchHybridSchema = z.object({
   filters: z.object({
     language: z.string().optional(),
     path: z.string().optional(),
+    layer: z.string().optional(),
+    service: z.string().optional(),
   }).optional(),
 });
 
