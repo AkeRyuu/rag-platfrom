@@ -1,0 +1,1097 @@
+{
+  "timestamp": "2026-02-07T18:44:12.175Z",
+  "projectName": "shared-ai-infra",
+  "collection": "shared-ai-infra_codebase",
+  "mode": "semantic",
+  "totalQueries": 41,
+  "perQuery": [
+    {
+      "id": "exact-1",
+      "query": "EmbeddingService embed method",
+      "category": "exact-match",
+      "expectedFiles": [
+        "src/services/embedding.ts"
+      ],
+      "resultFiles": [
+        "rag-api/src/services/embedding.ts",
+        "docker/bge-m3/server.py",
+        "docker/bge-m3/server.py",
+        "rag-api/src/services/embedding.ts",
+        "rag-api/src/services/embedding.ts",
+        "docker/bge-m3/server.py",
+        "rag-api/src/services/embedding.ts",
+        "docker/bge-m3/server.py",
+        "docker/bge-m3/server.py",
+        "rag-api/src/utils/metrics.ts"
+      ],
+      "k": 10,
+      "recallAtK": 1,
+      "precisionAtK": 0.4,
+      "mrr": 1,
+      "latencyMs": 186
+    },
+    {
+      "id": "exact-2",
+      "query": "VectorStoreService search method",
+      "category": "exact-match",
+      "expectedFiles": [
+        "src/services/vector-store.ts"
+      ],
+      "resultFiles": [
+        "rag-api/src/services/vector-store.ts",
+        "rag-api/src/routes/search.ts",
+        "rag-api/src/services/vector-store.ts",
+        "rag-api/src/services/vector-store.ts",
+        "rag-api/src/services/vector-store.ts",
+        "rag-api/src/types/api.ts",
+        "rag-api/src/services/vector-store.ts",
+        "rag-api/src/services/vector-store.ts",
+        "rag-api/src/services/vector-store.ts",
+        "rag-api/src/routes/search.ts"
+      ],
+      "k": 10,
+      "recallAtK": 1,
+      "precisionAtK": 0.7,
+      "mrr": 1,
+      "latencyMs": 137
+    },
+    {
+      "id": "exact-3",
+      "query": "buildSearchFilter function",
+      "category": "exact-match",
+      "expectedFiles": [
+        "src/utils/filters.ts"
+      ],
+      "resultFiles": [
+        "rag-api/src/utils/filters.ts",
+        "mcp-server/src/tools/search.ts",
+        "rag-api/src/utils/filters.ts",
+        "rag-api/src/routes/search.ts",
+        "docs/SPRINT-QDRANT-IMPROVEMENTS.md",
+        "rag-api/src/routes/testing.ts",
+        "docs/SPRINT-QDRANT-IMPROVEMENTS.md",
+        "rag-api/src/routes/review.ts",
+        "rag-api/src/utils/validation.ts",
+        "rag-api/src/services/vector-store.ts"
+      ],
+      "k": 10,
+      "recallAtK": 1,
+      "precisionAtK": 0.2,
+      "mrr": 1,
+      "latencyMs": 95
+    },
+    {
+      "id": "exact-4",
+      "query": "indexProject function",
+      "category": "exact-match",
+      "expectedFiles": [
+        "src/services/indexer.ts"
+      ],
+      "resultFiles": [
+        "rag-api/src/services/indexer.ts",
+        "rag-api/src/services/indexer.ts",
+        "mcp-server/src/tools/indexing.ts",
+        "rag-api/src/utils/validation.ts",
+        "rag-api/src/services/indexer.ts",
+        "rag-api/src/services/indexer.ts",
+        "rag-api/src/services/indexer.ts",
+        "rag-api/src/routes/index.ts",
+        "rag-api/src/routes/index.ts",
+        "rag-api/src/services/indexer.ts"
+      ],
+      "k": 10,
+      "recallAtK": 1,
+      "precisionAtK": 0.6,
+      "mrr": 1,
+      "latencyMs": 26
+    },
+    {
+      "id": "exact-5",
+      "query": "ContextPackBuilder build method",
+      "category": "exact-match",
+      "expectedFiles": [
+        "src/services/context-pack.ts"
+      ],
+      "resultFiles": [
+        "rag-api/src/services/context-pack.ts",
+        "rag-api/src/utils/validation.ts",
+        "rag-api/src/utils/validation.ts",
+        "rag-api/src/services/context-pack.ts",
+        "rag-api/src/utils/metrics.ts",
+        "rag-api/src/services/context-pack.ts",
+        "rag-api/src/routes/search.ts",
+        "rag-api/src/routes/review.ts",
+        "mcp-server/src/types.ts",
+        "mcp-server/src/context-enrichment.ts"
+      ],
+      "k": 10,
+      "recallAtK": 1,
+      "precisionAtK": 0.3,
+      "mrr": 1,
+      "latencyMs": 30
+    },
+    {
+      "id": "exact-6",
+      "query": "CodeParser parse method",
+      "category": "exact-match",
+      "expectedFiles": [
+        "src/services/parsers/code-parser.ts"
+      ],
+      "resultFiles": [
+        "rag-api/src/services/parsers/code-parser.ts",
+        "rag-api/src/services/parsers/contract-parser.ts",
+        "rag-api/src/services/parsers/code-parser.ts",
+        "rag-api/src/services/parsers/docs-parser.ts",
+        "rag-api/src/services/parsers/base-parser.ts",
+        "rag-api/src/services/parsers/ast-parser.ts",
+        "rag-api/src/services/parsers/code-parser.ts",
+        "rag-api/src/services/code-suggestions.ts",
+        "rag-api/src/services/parsers/config-parser.ts",
+        "rag-api/src/types/api.ts"
+      ],
+      "k": 10,
+      "recallAtK": 1,
+      "precisionAtK": 0.3,
+      "mrr": 1,
+      "latencyMs": 22
+    },
+    {
+      "id": "exact-7",
+      "query": "memoryService recall",
+      "category": "exact-match",
+      "expectedFiles": [
+        "src/services/memory.ts"
+      ],
+      "resultFiles": [
+        "mcp-server/src/tools/memory.ts",
+        "rag-api/src/utils/validation.ts",
+        "rag-api/src/services/memory.ts",
+        "rag-api/src/services/memory.ts",
+        "rag-api/src/routes/memory.ts",
+        "rag-api/src/services/memory-governance.ts",
+        "rag-api/src/services/memory.ts",
+        "rag-api/src/routes/memory.ts",
+        "rag-api/src/utils/validation.ts",
+        "rag-api/src/services/feedback.ts"
+      ],
+      "k": 10,
+      "recallAtK": 1,
+      "precisionAtK": 0.3,
+      "mrr": 0.3333333333333333,
+      "latencyMs": 24
+    },
+    {
+      "id": "exact-8",
+      "query": "graphStore expand",
+      "category": "exact-match",
+      "expectedFiles": [
+        "src/services/graph-store.ts"
+      ],
+      "resultFiles": [
+        "rag-api/src/services/graph-store.ts",
+        "rag-api/src/routes/search.ts",
+        "rag-api/src/routes/search.ts",
+        "rag-api/src/utils/metrics.ts",
+        "rag-api/src/services/vector-store.ts",
+        "rag-api/src/routes/search.ts",
+        "rag-api/src/services/parsers/ast-parser.ts",
+        "rag-api/src/services/indexer.ts",
+        "rag-api/src/routes/index.ts",
+        "rag-api/src/routes/search.ts"
+      ],
+      "k": 10,
+      "recallAtK": 1,
+      "precisionAtK": 0.1,
+      "mrr": 1,
+      "latencyMs": 21
+    },
+    {
+      "id": "exact-9",
+      "query": "searchSchema validation",
+      "category": "exact-match",
+      "expectedFiles": [
+        "src/utils/validation.ts"
+      ],
+      "resultFiles": [
+        "rag-api/src/utils/validation.ts",
+        "rag-api/src/utils/validation.ts",
+        "rag-api/src/utils/validation.ts",
+        "rag-api/src/utils/validation.ts",
+        "rag-api/src/utils/validation.ts",
+        "rag-api/src/utils/validation.ts",
+        "rag-api/src/utils/validation.ts",
+        "rag-api/src/utils/validation.ts",
+        "rag-api/src/utils/validation.ts",
+        "rag-api/src/utils/validation.ts"
+      ],
+      "k": 10,
+      "recallAtK": 1,
+      "precisionAtK": 1,
+      "mrr": 1,
+      "latencyMs": 24
+    },
+    {
+      "id": "exact-10",
+      "query": "createSearchTools function",
+      "category": "exact-match",
+      "expectedFiles": [
+        "mcp-server/src/tools/search.ts"
+      ],
+      "resultFiles": [
+        "mcp-server/src/tools/search.ts",
+        "mcp-server/src/tools/indexing.ts",
+        "mcp-server/src/tools/confluence.ts",
+        "mcp-server/src/tools/ask.ts",
+        "rag-api/src/utils/filters.ts",
+        "mcp-server/src/tools/agents.ts",
+        "rag-api/src/utils/validation.ts",
+        "mcp-server/src/tools/review.ts",
+        "mcp-server/src/tools/feedback.ts",
+        "rag-api/src/utils/filters.ts"
+      ],
+      "k": 10,
+      "recallAtK": 1,
+      "precisionAtK": 0.1,
+      "mrr": 1,
+      "latencyMs": 23
+    },
+    {
+      "id": "concept-1",
+      "query": "how does hybrid search combine semantic and keyword results",
+      "category": "concept",
+      "expectedFiles": [
+        "src/routes/search.ts",
+        "src/services/context-pack.ts"
+      ],
+      "resultFiles": [
+        "rag-api/src/routes/search.ts",
+        "rag-api/src/routes/search.ts",
+        "rag-api/src/services/context-pack.ts",
+        "rag-api/src/utils/validation.ts",
+        "docs/MASTER-SPRINT-PLAN.md",
+        "rag-api/src/routes/search.ts",
+        "docs/SPRINT-QDRANT-IMPROVEMENTS.md",
+        "mcp-server/src/tools/search.ts",
+        "rag-api/src/routes/search.ts",
+        "rag-api/src/services/memory.ts"
+      ],
+      "k": 10,
+      "recallAtK": 1,
+      "precisionAtK": 0.5,
+      "mrr": 1,
+      "latencyMs": 21
+    },
+    {
+      "id": "concept-2",
+      "query": "how are embeddings cached across sessions",
+      "category": "concept",
+      "expectedFiles": [
+        "src/services/embedding.ts",
+        "src/services/cache.ts"
+      ],
+      "resultFiles": [
+        "rag-api/src/services/embedding.ts",
+        "rag-api/src/services/cache.ts",
+        "rag-api/src/services/session-context.ts",
+        "mcp-server/src/tools/cache.ts",
+        "rag-api/src/services/usage-tracker.ts",
+        "rag-api/src/eval/golden-queries.json",
+        "rag-api/src/services/predictive-loader.ts",
+        "rag-api/src/services/memory.ts",
+        "docker/bge-m3/server.py",
+        "rag-api/src/utils/metrics.ts"
+      ],
+      "k": 10,
+      "recallAtK": 1,
+      "precisionAtK": 0.2,
+      "mrr": 1,
+      "latencyMs": 25
+    },
+    {
+      "id": "concept-3",
+      "query": "how does the parser registry route files to parsers",
+      "category": "concept",
+      "expectedFiles": [
+        "src/services/parsers/index.ts",
+        "src/services/parsers/code-parser.ts"
+      ],
+      "resultFiles": [
+        "rag-api/src/services/parsers/index.ts",
+        "rag-api/src/services/parsers/base-parser.ts",
+        "rag-api/src/services/parsers/docs-parser.ts",
+        "rag-api/src/services/indexer.ts",
+        "rag-api/src/services/parsers/code-parser.ts",
+        "rag-api/src/services/parsers/contract-parser.ts",
+        "rag-api/src/services/parsers/ast-parser.ts",
+        "rag-api/src/services/parsers/base-parser.ts",
+        "rag-api/src/services/parsers/code-parser.ts",
+        "rag-api/src/services/parsers/ast-parser.ts"
+      ],
+      "k": 10,
+      "recallAtK": 1,
+      "precisionAtK": 0.3,
+      "mrr": 1,
+      "latencyMs": 31
+    },
+    {
+      "id": "concept-4",
+      "query": "how does zero-downtime reindexing work with aliases",
+      "category": "concept",
+      "expectedFiles": [
+        "src/services/indexer.ts",
+        "src/services/vector-store.ts"
+      ],
+      "resultFiles": [
+        "rag-api/src/services/indexer.ts",
+        "rag-api/src/routes/index.ts",
+        "rag-api/src/routes/index.ts",
+        "rag-api/src/services/indexer.ts",
+        "mcp-server/src/tools/indexing.ts",
+        "docs/SPRINT-QDRANT-IMPROVEMENTS.md",
+        "rag-api/src/services/vector-store.ts",
+        "rag-api/src/services/indexer.ts",
+        "docs/MASTER-SPRINT-PLAN.md",
+        "rag-api/src/services/indexer.ts"
+      ],
+      "k": 10,
+      "recallAtK": 1,
+      "precisionAtK": 0.5,
+      "mrr": 1,
+      "latencyMs": 21
+    },
+    {
+      "id": "concept-5",
+      "query": "how does context pack builder assemble faceted retrieval",
+      "category": "concept",
+      "expectedFiles": [
+        "src/services/context-pack.ts"
+      ],
+      "resultFiles": [
+        "rag-api/src/services/context-pack.ts",
+        "rag-api/src/routes/search.ts",
+        "rag-api/src/routes/search.ts",
+        "rag-api/src/services/context-pack.ts",
+        "rag-api/src/services/context-pack.ts",
+        "rag-api/src/utils/metrics.ts",
+        "rag-api/src/routes/search.ts",
+        "rag-api/src/routes/search.ts",
+        "rag-api/src/routes/search.ts",
+        "rag-api/src/eval/golden-queries.json"
+      ],
+      "k": 10,
+      "recallAtK": 1,
+      "precisionAtK": 0.3,
+      "mrr": 1,
+      "latencyMs": 19
+    },
+    {
+      "id": "concept-6",
+      "query": "how are memory governance and quarantine implemented",
+      "category": "concept",
+      "expectedFiles": [
+        "src/services/memory.ts"
+      ],
+      "resultFiles": [
+        "rag-api/src/services/memory-governance.ts",
+        "rag-api/src/routes/memory.ts",
+        "rag-api/src/routes/memory.ts",
+        "docs/COMPARISON-REPORT.md",
+        "docs/COMPARISON-REPORT.md",
+        "rag-api/src/utils/metrics.ts",
+        "rag-api/src/routes/memory.ts",
+        "mcp-server/src/tools/memory.ts",
+        "rag-api/src/services/memory.ts",
+        "docs/COMPARISON-REPORT.md"
+      ],
+      "k": 10,
+      "recallAtK": 1,
+      "precisionAtK": 0.1,
+      "mrr": 0.1111111111111111,
+      "latencyMs": 36
+    },
+    {
+      "id": "concept-7",
+      "query": "how does LLM reranking improve search results",
+      "category": "concept",
+      "expectedFiles": [
+        "src/services/context-pack.ts"
+      ],
+      "resultFiles": [
+        "rag-api/src/utils/metrics.ts",
+        "rag-api/src/services/query-learning.ts",
+        "rag-api/src/services/context-pack.ts",
+        "docs/COMPARISON-REPORT.md",
+        "rag-api/src/services/cache.ts",
+        "rag-api/src/routes/search.ts",
+        "docs/SPRINT-QDRANT-IMPROVEMENTS.md",
+        "mcp-server/src/tools/pm.ts",
+        "rag-api/src/services/memory.ts",
+        "docs/MASTER-SPRINT-PLAN.md"
+      ],
+      "k": 10,
+      "recallAtK": 1,
+      "precisionAtK": 0.1,
+      "mrr": 0.3333333333333333,
+      "latencyMs": 25
+    },
+    {
+      "id": "concept-8",
+      "query": "what is the incremental indexing strategy for changed files",
+      "category": "concept",
+      "expectedFiles": [
+        "src/services/indexer.ts"
+      ],
+      "resultFiles": [
+        "rag-api/src/services/indexer.ts",
+        "rag-api/src/services/indexer.ts",
+        "rag-api/src/services/indexer.ts",
+        "docs/SPRINT-QDRANT-IMPROVEMENTS.md",
+        "rag-api/src/services/indexer.ts",
+        "docs/COMPARISON-REPORT.md",
+        "rag-api/src/services/vector-store.ts",
+        "mcp-server/src/tools/indexing.ts",
+        "rag-api/src/services/vector-store.ts",
+        "rag-api/src/services/predictive-loader.ts"
+      ],
+      "k": 10,
+      "recallAtK": 1,
+      "precisionAtK": 0.4,
+      "mrr": 1,
+      "latencyMs": 27
+    },
+    {
+      "id": "concept-9",
+      "query": "how does the MCP tool registry dispatch and enrich tool calls",
+      "category": "concept",
+      "expectedFiles": [
+        "mcp-server/src/tool-registry.ts"
+      ],
+      "resultFiles": [
+        "mcp-server/src/tool-registry.ts",
+        "mcp-server/src/context-enrichment.ts",
+        "mcp-server/src/context-enrichment.ts",
+        "mcp-server/src/types.ts",
+        "mcp-server/src/context-enrichment.ts",
+        "mcp-server/src/index.ts",
+        "mcp-server/src/tools/memory.ts",
+        "mcp-server/src/types.ts",
+        "rag-api/src/eval/golden-queries.json",
+        "docs/SPRINT-MEMORY-CLAUDE-INTEGRATION.md"
+      ],
+      "k": 10,
+      "recallAtK": 1,
+      "precisionAtK": 0.1,
+      "mrr": 1,
+      "latencyMs": 21
+    },
+    {
+      "id": "concept-10",
+      "query": "how does AST parser extract import edges for the project graph",
+      "category": "concept",
+      "expectedFiles": [
+        "src/services/parsers/ast-parser.ts",
+        "src/services/graph-store.ts"
+      ],
+      "resultFiles": [
+        "rag-api/src/services/parsers/ast-parser.ts",
+        "rag-api/src/services/parsers/ast-parser.ts",
+        "rag-api/src/services/parsers/code-parser.ts",
+        "rag-api/src/services/graph-store.ts",
+        "rag-api/src/routes/index.ts",
+        "rag-api/src/services/parsers/code-parser.ts",
+        "rag-api/src/services/indexer.ts",
+        "rag-api/src/services/parsers/code-parser.ts",
+        "rag-api/src/services/code-suggestions.ts",
+        "rag-api/src/routes/analytics.ts"
+      ],
+      "k": 10,
+      "recallAtK": 1,
+      "precisionAtK": 0.3,
+      "mrr": 1,
+      "latencyMs": 25
+    },
+    {
+      "id": "concept-11",
+      "query": "how does the token budget compression select chunks",
+      "category": "concept",
+      "expectedFiles": [
+        "src/services/context-pack.ts"
+      ],
+      "resultFiles": [
+        "rag-api/src/services/context-pack.ts",
+        "rag-api/src/services/indexer.ts",
+        "rag-api/src/services/vector-store.ts",
+        "mcp-server/src/tools/clustering.ts",
+        "rag-api/src/services/parsers/code-parser.ts",
+        "rag-api/src/services/memory.ts",
+        "rag-api/src/routes/index.ts",
+        "rag-api/src/services/cache.ts",
+        "rag-api/src/routes/search.ts",
+        "docs/SPRINT-QDRANT-IMPROVEMENTS.md"
+      ],
+      "k": 10,
+      "recallAtK": 1,
+      "precisionAtK": 0.1,
+      "mrr": 1,
+      "latencyMs": 76
+    },
+    {
+      "id": "concept-12",
+      "query": "what vector similarity distance metric is used for search",
+      "category": "concept",
+      "expectedFiles": [
+        "src/services/vector-store.ts"
+      ],
+      "resultFiles": [
+        "rag-api/src/utils/metrics.ts",
+        "docs/SPRINT-QDRANT-IMPROVEMENTS.md",
+        "rag-api/src/utils/metrics.ts",
+        "docs/SPRINT-QDRANT-IMPROVEMENTS.md",
+        "mcp-server/src/tools/search.ts",
+        "docs/COMPARISON-REPORT.md",
+        "rag-api/src/utils/validation.ts",
+        "rag-api/src/services/vector-store.ts",
+        "docs/MASTER-SPRINT-PLAN.md",
+        "docs/SPRINT-QDRANT-IMPROVEMENTS.md"
+      ],
+      "k": 10,
+      "recallAtK": 1,
+      "precisionAtK": 0.1,
+      "mrr": 0.125,
+      "latencyMs": 24
+    },
+    {
+      "id": "concept-13",
+      "query": "how does batch embedding work with BGE-M3 server",
+      "category": "concept",
+      "expectedFiles": [
+        "src/services/embedding.ts"
+      ],
+      "resultFiles": [
+        "docker/bge-m3/server.py",
+        "docker/bge-m3/server.py",
+        "rag-api/src/services/embedding.ts",
+        "docker/bge-m3/server.py",
+        "docker/bge-m3/server.py",
+        "docker/bge-m3/server.py",
+        "rag-api/src/config.ts",
+        "rag-api/src/eval/golden-queries.json",
+        "docker/bge-m3/server.py",
+        "docs/COMPARISON-REPORT.md"
+      ],
+      "k": 10,
+      "recallAtK": 1,
+      "precisionAtK": 0.1,
+      "mrr": 0.3333333333333333,
+      "latencyMs": 26
+    },
+    {
+      "id": "concept-14",
+      "query": "how are Qdrant payload indexes created for filtering",
+      "category": "concept",
+      "expectedFiles": [
+        "src/services/vector-store.ts"
+      ],
+      "resultFiles": [
+        "docs/SPRINT-QDRANT-IMPROVEMENTS.md",
+        "docs/SPRINT-QDRANT-IMPROVEMENTS.md",
+        "rag-api/src/utils/filters.ts",
+        "rag-api/src/routes/index.ts",
+        "rag-api/src/services/vector-store.ts",
+        "docs/SPRINT-QDRANT-IMPROVEMENTS.md",
+        "rag-api/src/eval/golden-queries.json",
+        "docs/SPRINT-QDRANT-IMPROVEMENTS.md",
+        "docs/SPRINT-QDRANT-IMPROVEMENTS.md",
+        "rag-api/src/utils/filters.ts"
+      ],
+      "k": 10,
+      "recallAtK": 1,
+      "precisionAtK": 0.1,
+      "mrr": 0.2,
+      "latencyMs": 22
+    },
+    {
+      "id": "concept-15",
+      "query": "how does the Express error handling middleware work",
+      "category": "concept",
+      "expectedFiles": [
+        "src/middleware/error-handler.ts",
+        "src/middleware/async-handler.ts"
+      ],
+      "resultFiles": [
+        "rag-api/src/middleware/error-handler.ts",
+        "rag-api/src/utils/errors.ts",
+        "rag-api/src/middleware/async-handler.ts",
+        "rag-api/src/eval/golden-queries.json",
+        "rag-api/src/utils/validation.ts",
+        "rag-api/src/services/quality-gates.ts",
+        "rag-api/src/routes/agents.ts",
+        "rag-api/src/services/parsers/ast-parser.ts",
+        "rag-api/src/services/embedding.ts",
+        "rag-api/src/services/agent-runtime.ts"
+      ],
+      "k": 10,
+      "recallAtK": 1,
+      "precisionAtK": 0.2,
+      "mrr": 1,
+      "latencyMs": 22
+    },
+    {
+      "id": "cross-1",
+      "query": "what happens when a search request comes in from MCP to Qdrant",
+      "category": "cross-file",
+      "expectedFiles": [
+        "mcp-server/src/tools/search.ts",
+        "src/routes/search.ts",
+        "src/services/vector-store.ts"
+      ],
+      "resultFiles": [
+        "rag-api/src/eval/golden-queries.json",
+        "docs/SPRINT-QDRANT-IMPROVEMENTS.md",
+        "docs/SPRINT-QDRANT-IMPROVEMENTS.md",
+        "docs/SPRINT-QDRANT-IMPROVEMENTS.md",
+        "docs/SPRINT-QDRANT-IMPROVEMENTS.md",
+        "rag-api/src/utils/filters.ts",
+        "docs/COMPARISON-REPORT.md",
+        "docs/SPRINT-MEMORY-CLAUDE-INTEGRATION.md",
+        "rag-api/src/types/api.ts",
+        "rag-api/src/types/api.ts"
+      ],
+      "k": 10,
+      "recallAtK": 0,
+      "precisionAtK": 0,
+      "mrr": 0,
+      "latencyMs": 22
+    },
+    {
+      "id": "cross-2",
+      "query": "how does file indexing flow from disk to Qdrant collections",
+      "category": "cross-file",
+      "expectedFiles": [
+        "src/services/indexer.ts",
+        "src/services/parsers/code-parser.ts",
+        "src/services/embedding.ts",
+        "src/services/vector-store.ts"
+      ],
+      "resultFiles": [
+        "docs/SPRINT-QDRANT-IMPROVEMENTS.md",
+        "rag-api/src/eval/golden-queries.json",
+        "docs/SPRINT-QDRANT-IMPROVEMENTS.md",
+        "rag-api/src/services/indexer.ts",
+        "docs/MASTER-SPRINT-PLAN.md",
+        "docs/SPRINT-QDRANT-IMPROVEMENTS.md",
+        "rag-api/src/services/vector-store.ts",
+        "docs/COMPARISON-REPORT.md",
+        "docs/SPRINT-QDRANT-IMPROVEMENTS.md",
+        "rag-api/src/services/memory.ts"
+      ],
+      "k": 10,
+      "recallAtK": 0.5,
+      "precisionAtK": 0.2,
+      "mrr": 0.25,
+      "latencyMs": 23
+    },
+    {
+      "id": "cross-3",
+      "query": "how does the memory remember and recall pipeline work end to end",
+      "category": "cross-file",
+      "expectedFiles": [
+        "mcp-server/src/tools/memory.ts",
+        "src/routes/memory.ts",
+        "src/services/memory.ts"
+      ],
+      "resultFiles": [
+        "docs/SPRINT-MEMORY-CLAUDE-INTEGRATION.md",
+        "rag-api/src/services/memory.ts",
+        "mcp-server/src/tools/memory.ts",
+        "rag-api/src/routes/memory.ts",
+        "rag-api/src/services/memory-governance.ts",
+        "docs/COMPARISON-REPORT.md",
+        "rag-api/src/utils/validation.ts",
+        "rag-api/src/routes/memory.ts",
+        "docs/SPRINT-MEMORY-CLAUDE-INTEGRATION.md",
+        "rag-api/src/routes/memory.ts"
+      ],
+      "k": 10,
+      "recallAtK": 1,
+      "precisionAtK": 0.5,
+      "mrr": 0.5,
+      "latencyMs": 20
+    },
+    {
+      "id": "cross-4",
+      "query": "how do validation schemas connect to route handlers",
+      "category": "cross-file",
+      "expectedFiles": [
+        "src/utils/validation.ts",
+        "src/routes/search.ts"
+      ],
+      "resultFiles": [
+        "rag-api/src/utils/validation.ts",
+        "rag-api/src/routes/index.ts",
+        "rag-api/src/routes/memory.ts",
+        "rag-api/src/routes/index.ts",
+        "rag-api/src/routes/index.ts",
+        "rag-api/src/routes/index.ts",
+        "rag-api/src/utils/validation.ts",
+        "rag-api/src/routes/index.ts",
+        "rag-api/src/utils/validation.ts",
+        "rag-api/src/eval/golden-queries.json"
+      ],
+      "k": 10,
+      "recallAtK": 0.5,
+      "precisionAtK": 0.3,
+      "mrr": 1,
+      "latencyMs": 19
+    },
+    {
+      "id": "cross-5",
+      "query": "how does graph expansion enhance search results across services",
+      "category": "cross-file",
+      "expectedFiles": [
+        "src/services/graph-store.ts",
+        "src/routes/search.ts",
+        "src/services/context-pack.ts"
+      ],
+      "resultFiles": [
+        "rag-api/src/routes/search.ts",
+        "rag-api/src/routes/search.ts",
+        "rag-api/src/eval/golden-queries.json",
+        "mcp-server/src/tools/search.ts",
+        "rag-api/src/routes/search.ts",
+        "docs/COMPARISON-REPORT.md",
+        "docs/COMPARISON-REPORT.md",
+        "rag-api/src/routes/search.ts",
+        "docs/SPRINT-QDRANT-IMPROVEMENTS.md",
+        "docs/COMPARISON-REPORT.md"
+      ],
+      "k": 10,
+      "recallAtK": 0.3333333333333333,
+      "precisionAtK": 0.4,
+      "mrr": 1,
+      "latencyMs": 20
+    },
+    {
+      "id": "cross-6",
+      "query": "how do tool usage tracking events flow from MCP to Qdrant",
+      "category": "cross-file",
+      "expectedFiles": [
+        "mcp-server/src/tool-registry.ts",
+        "src/services/usage-tracker.ts"
+      ],
+      "resultFiles": [
+        "rag-api/src/eval/golden-queries.json",
+        "docs/SPRINT-QDRANT-IMPROVEMENTS.md",
+        "docs/COMPARISON-REPORT.md",
+        "docs/MASTER-SPRINT-PLAN.md",
+        "docs/SPRINT-MEMORY-CLAUDE-INTEGRATION.md",
+        "docs/SPRINT-MEMORY-CLAUDE-INTEGRATION.md",
+        "rag-api/src/services/usage-tracker.ts",
+        "docs/SPRINT-QDRANT-IMPROVEMENTS.md",
+        "mcp-server/src/index.ts",
+        "rag-api/src/routes/analytics.ts"
+      ],
+      "k": 10,
+      "recallAtK": 0.5,
+      "precisionAtK": 0.1,
+      "mrr": 0.14285714285714285,
+      "latencyMs": 31
+    },
+    {
+      "id": "cross-7",
+      "query": "how do search filters flow from MCP tool params to Qdrant query",
+      "category": "cross-file",
+      "expectedFiles": [
+        "mcp-server/src/tools/search.ts",
+        "src/utils/filters.ts",
+        "src/services/vector-store.ts"
+      ],
+      "resultFiles": [
+        "docs/SPRINT-QDRANT-IMPROVEMENTS.md",
+        "docs/SPRINT-QDRANT-IMPROVEMENTS.md",
+        "rag-api/src/eval/golden-queries.json",
+        "rag-api/src/utils/filters.ts",
+        "docs/SPRINT-MEMORY-CLAUDE-INTEGRATION.md",
+        "docs/SPRINT-QDRANT-IMPROVEMENTS.md",
+        "docs/SPRINT-QDRANT-IMPROVEMENTS.md",
+        "rag-api/src/routes/search.ts",
+        "docs/MASTER-SPRINT-PLAN.md",
+        "mcp-server/src/tools/search.ts"
+      ],
+      "k": 10,
+      "recallAtK": 0.6666666666666666,
+      "precisionAtK": 0.2,
+      "mrr": 0.25,
+      "latencyMs": 26
+    },
+    {
+      "id": "cross-8",
+      "query": "how does the config parser handle YAML and JSON files differently from code",
+      "category": "cross-file",
+      "expectedFiles": [
+        "src/services/parsers/config-parser.ts",
+        "src/services/parsers/code-parser.ts",
+        "src/services/parsers/index.ts"
+      ],
+      "resultFiles": [
+        "rag-api/src/services/parsers/config-parser.ts",
+        "rag-api/src/services/parsers/contract-parser.ts",
+        "mcp-server/.eslintrc.json",
+        "mcp-server/package.json",
+        "mcp-server/.eslintrc.json",
+        "rag-api/tsconfig.json",
+        "rag-api/.eslintrc.json",
+        "rag-api/.eslintrc.json",
+        "mcp-server/package.json",
+        "rag-api/package.json"
+      ],
+      "k": 10,
+      "recallAtK": 0.3333333333333333,
+      "precisionAtK": 0.1,
+      "mrr": 1,
+      "latencyMs": 21
+    },
+    {
+      "id": "cross-9",
+      "query": "how does the MCP server register and dispatch all tool modules",
+      "category": "cross-file",
+      "expectedFiles": [
+        "mcp-server/src/index.ts",
+        "mcp-server/src/tool-registry.ts"
+      ],
+      "resultFiles": [
+        "mcp-server/src/index.ts",
+        "docs/MASTER-SPRINT-PLAN.md",
+        "mcp-server/src/types.ts",
+        "mcp-server/src/types.ts",
+        "mcp-server/src/index.ts",
+        "mcp-server/src/index.ts",
+        "mcp-server/src/types.ts",
+        "mcp-server/package.json",
+        ".claude/settings.local.json",
+        "docs/SPRINT-MEMORY-CLAUDE-INTEGRATION.md"
+      ],
+      "k": 10,
+      "recallAtK": 0.5,
+      "precisionAtK": 0.3,
+      "mrr": 1,
+      "latencyMs": 21
+    },
+    {
+      "id": "cross-10",
+      "query": "how does collection routing work for typed vs legacy collections in the indexer",
+      "category": "cross-file",
+      "expectedFiles": [
+        "src/services/indexer.ts",
+        "src/config.ts"
+      ],
+      "resultFiles": [
+        "rag-api/src/routes/index.ts",
+        "rag-api/src/routes/index.ts",
+        "rag-api/src/services/indexer.ts",
+        "rag-api/src/routes/index.ts",
+        "rag-api/src/services/indexer.ts",
+        "rag-api/src/routes/index.ts",
+        "rag-api/src/services/vector-store.ts",
+        "rag-api/src/routes/index.ts",
+        "rag-api/src/eval/golden-queries.json",
+        "rag-api/src/services/vector-store.ts"
+      ],
+      "k": 10,
+      "recallAtK": 0.5,
+      "precisionAtK": 0.2,
+      "mrr": 0.3333333333333333,
+      "latencyMs": 38
+    },
+    {
+      "id": "config-1",
+      "query": "what embedding providers are supported and how to configure them",
+      "category": "config-docs",
+      "expectedFiles": [
+        "src/config.ts",
+        "src/services/embedding.ts"
+      ],
+      "resultFiles": [
+        "rag-api/src/services/embedding.ts",
+        "rag-api/src/config.ts",
+        "docker/bge-m3/server.py",
+        "rag-api/src/eval/golden-queries.json",
+        "rag-api/src/services/embedding.ts",
+        "docker/bge-m3/server.py",
+        "rag-api/src/utils/metrics.ts",
+        "docker/bge-m3/server.py",
+        "rag-api/src/services/code-suggestions.ts",
+        "rag-api/src/services/embedding.ts"
+      ],
+      "k": 10,
+      "recallAtK": 1,
+      "precisionAtK": 0.4,
+      "mrr": 1,
+      "latencyMs": 22
+    },
+    {
+      "id": "config-2",
+      "query": "how to set up MCP server for a new project",
+      "category": "config-docs",
+      "expectedFiles": [
+        "mcp-server/src/index.ts"
+      ],
+      "resultFiles": [
+        "mcp-server/src/index.ts",
+        ".claude/settings.local.json",
+        "mcp-server/package.json",
+        "mcp-server/package.json",
+        "mcp-server/src/index.ts",
+        "mcp-server/src/api-client.ts",
+        "mcp-server/package.json",
+        "mcp-server/package.json",
+        "mcp-server/package.json",
+        "mcp-server/package.json"
+      ],
+      "k": 10,
+      "recallAtK": 1,
+      "precisionAtK": 0.2,
+      "mrr": 1,
+      "latencyMs": 24
+    },
+    {
+      "id": "config-3",
+      "query": "what environment variables control the RAG API behavior",
+      "category": "config-docs",
+      "expectedFiles": [
+        "src/config.ts"
+      ],
+      "resultFiles": [
+        "rag-api/src/services/agent-profiles.ts",
+        "rag-api/src/utils/validation.ts",
+        "rag-api/package.json",
+        "rag-api/src/routes/analytics.ts",
+        "rag-api/src/config.ts",
+        "rag-api/src/config.ts",
+        "rag-api/src/routes/index.ts",
+        "rag-api/src/server.ts",
+        "rag-api/src/routes/index.ts",
+        "rag-api/package.json"
+      ],
+      "k": 10,
+      "recallAtK": 1,
+      "precisionAtK": 0.2,
+      "mrr": 0.2,
+      "latencyMs": 22
+    },
+    {
+      "id": "config-4",
+      "query": "docker compose services and ports configuration",
+      "category": "config-docs",
+      "expectedFiles": [
+        "docker/docker-compose.yml"
+      ],
+      "resultFiles": [
+        ".claude/settings.local.json",
+        "docs/COMPARISON-REPORT.md",
+        "docs/BEEP-SERVICES-SETUP.md",
+        "docker/bge-m3/server.py",
+        "rag-api/src/config.ts",
+        "docs/COMPARISON-REPORT.md",
+        "docker/bge-m3/server.py",
+        "rag-api/src/config.ts",
+        ".claude/settings.local.json",
+        "docker/bge-m3/server.py"
+      ],
+      "k": 10,
+      "recallAtK": 0,
+      "precisionAtK": 0,
+      "mrr": 0,
+      "latencyMs": 20
+    },
+    {
+      "id": "config-5",
+      "query": "what Qdrant payload fields are indexed for filtering",
+      "category": "config-docs",
+      "expectedFiles": [
+        "src/services/vector-store.ts"
+      ],
+      "resultFiles": [
+        "docs/SPRINT-QDRANT-IMPROVEMENTS.md",
+        "docs/SPRINT-QDRANT-IMPROVEMENTS.md",
+        "docs/SPRINT-QDRANT-IMPROVEMENTS.md",
+        "docs/SPRINT-QDRANT-IMPROVEMENTS.md",
+        "docs/SPRINT-QDRANT-IMPROVEMENTS.md",
+        "docs/SPRINT-QDRANT-IMPROVEMENTS.md",
+        "rag-api/src/services/vector-store.ts",
+        "docs/SPRINT-QDRANT-IMPROVEMENTS.md",
+        "docs/SPRINT-QDRANT-IMPROVEMENTS.md",
+        "docs/MASTER-SPRINT-PLAN.md"
+      ],
+      "k": 10,
+      "recallAtK": 1,
+      "precisionAtK": 0.1,
+      "mrr": 0.14285714285714285,
+      "latencyMs": 20
+    },
+    {
+      "id": "config-6",
+      "query": "how to configure separate vs legacy collection routing",
+      "category": "config-docs",
+      "expectedFiles": [
+        "src/config.ts",
+        "src/services/indexer.ts"
+      ],
+      "resultFiles": [
+        "rag-api/src/routes/index.ts",
+        "rag-api/src/routes/index.ts",
+        "rag-api/src/routes/index.ts",
+        "rag-api/src/routes/index.ts",
+        "rag-api/src/routes/index.ts",
+        "rag-api/src/routes/index.ts",
+        "rag-api/src/eval/golden-queries.json",
+        "rag-api/src/routes/index.ts",
+        "rag-api/src/routes/index.ts",
+        "rag-api/src/services/vector-store.ts"
+      ],
+      "k": 10,
+      "recallAtK": 0,
+      "precisionAtK": 0,
+      "mrr": 0,
+      "latencyMs": 20
+    }
+  ],
+  "aggregate": {
+    "meanRecallAtK": 0.8252032520325202,
+    "meanPrecisionAtK": 0.25853658536585356,
+    "meanMRR": 0.6891502129307007,
+    "count": 41
+  },
+  "byCategory": {
+    "exact-match": {
+      "meanRecallAtK": 1,
+      "meanPrecisionAtK": 0.39999999999999997,
+      "meanMRR": 0.9333333333333332,
+      "count": 10
+    },
+    "concept": {
+      "meanRecallAtK": 1,
+      "meanPrecisionAtK": 0.22666666666666668,
+      "meanMRR": 0.7401851851851851,
+      "count": 15
+    },
+    "cross-file": {
+      "meanRecallAtK": 0.4833333333333334,
+      "meanPrecisionAtK": 0.23000000000000004,
+      "meanMRR": 0.5476190476190476,
+      "count": 10
+    },
+    "config-docs": {
+      "meanRecallAtK": 0.6666666666666666,
+      "meanPrecisionAtK": 0.15,
+      "meanMRR": 0.3904761904761905,
+      "count": 6
+    }
+  },
+  "latency": {
+    "mean": 34,
+    "p50": 23,
+    "p95": 95,
+    "p99": 186
+  }
+}

@@ -72,6 +72,9 @@ const DEFAULT_EXCLUDE = [
   '**/vendor/**',
   '**/__pycache__/**',
   '**/target/**',
+  '**/package-lock.json',
+  '**/yarn.lock',
+  '**/pnpm-lock.yaml',
 ];
 
 // File hash index for incremental indexing
@@ -386,11 +389,10 @@ export async function indexProject(options: IndexOptions): Promise<IndexStats> {
       const allChunks: ChunkInfo[] = [];
       const processedFiles: string[] = [];
       const gitCommit = getGitCommit(projectPath);
-
       for (const filePath of fileBatch) {
+        const relativePath = path.relative(projectPath, filePath);
         try {
           const content = fs.readFileSync(filePath, 'utf-8');
-          const relativePath = path.relative(projectPath, filePath);
           const language = getLanguage(filePath);
           const hash = computeFileHash(content);
 
@@ -471,12 +473,22 @@ export async function indexProject(options: IndexOptions): Promise<IndexStats> {
       }
 
       // Batch embed all chunks for this file batch
-      if (allChunks.length > 0) {
+      // Skip oversized chunks (e.g. minified files, lock files)
+      const MAX_CHUNK_CHARS = 40000; // ~10K tokens, safety margin for BGE-M3
+      const filteredChunks = allChunks.filter(c => {
+        if (c.text.length > MAX_CHUNK_CHARS) {
+          logger.warn(`Skipping oversized chunk: ${c.relativePath} (${c.text.length} chars)`);
+          return false;
+        }
+        return true;
+      });
+
+      if (filteredChunks.length > 0) {
         const points: VectorPoint[] = [];
         const sparsePoints: SparseVectorPoint[] = [];
 
         // Build anchor-prefixed texts for embedding
-        const buildAnchoredTexts = (batch: typeof allChunks) =>
+        const buildAnchoredTexts = (batch: typeof filteredChunks) =>
           batch.map(c => {
             const anchor = buildAnchorString({
               filePath: c.relativePath,
@@ -512,8 +524,8 @@ export async function indexProject(options: IndexOptions): Promise<IndexStats> {
         });
 
         // Process embeddings in batches
-        for (let j = 0; j < allChunks.length; j += embeddingBatchSize) {
-          const chunkBatch = allChunks.slice(j, j + embeddingBatchSize);
+        for (let j = 0; j < filteredChunks.length; j += embeddingBatchSize) {
+          const chunkBatch = filteredChunks.slice(j, j + embeddingBatchSize);
           const textsForEmbedding = buildAnchoredTexts(chunkBatch);
 
           try {
