@@ -59,6 +59,9 @@ const DEFAULT_PATTERNS = [
   '**/*.java',
   '**/*.md',
   '**/*.sql',
+  '**/*.yml',
+  '**/*.yaml',
+  '**/Dockerfile',
 ];
 
 const DEFAULT_EXCLUDE = [
@@ -75,6 +78,8 @@ const DEFAULT_EXCLUDE = [
   '**/package-lock.json',
   '**/yarn.lock',
   '**/pnpm-lock.yaml',
+  '**/eval/results/**',
+  '**/eval/golden-queries.json',
 ];
 
 // File hash index for incremental indexing
@@ -148,6 +153,10 @@ function chunkCode(content: string, maxChunkSize: number = 1000): string[] {
  * Get language from file extension
  */
 function getLanguage(filePath: string): string {
+  const basename = path.basename(filePath);
+  if (basename === 'Dockerfile' || basename.startsWith('Dockerfile.')) {
+    return 'dockerfile';
+  }
   const ext = path.extname(filePath).toLowerCase();
   const langMap: Record<string, string> = {
     '.ts': 'typescript',

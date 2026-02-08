@@ -112,28 +112,72 @@ export class CodeParser implements FileParser {
     // Extract file-level imports
     const imports = sourceFile.getImportDeclarations().map(i => i.getModuleSpecifierValue());
 
-    // Extract classes with their methods
+    // Extract classes — split large classes into per-method chunks
     for (const cls of sourceFile.getClasses()) {
       const name = cls.getName() || 'anonymous';
-      const methods = cls.getMethods().map(m => m.getName());
+      const classText = cls.getFullText();
+      const methods = cls.getMethods();
+      const methodNames = methods.map(m => m.getName());
       const jsdoc = cls.getJsDocs().map(d => d.getDescription()).filter(Boolean).join('\n');
 
-      chunks.push({
-        content: cls.getFullText(),
-        startLine: cls.getStartLineNumber(),
-        endLine: cls.getEndLineNumber(),
-        language,
-        type: 'code',
-        symbols: [name, ...methods],
-        imports: chunks.length === 0 ? imports : undefined,
-        metadata: {
-          kind: 'class',
-          extends: cls.getExtends()?.getText(),
-          implements: cls.getImplements().map(i => i.getText()),
-          exported: cls.isExported(),
-          ...(jsdoc ? { jsdoc } : {}),
-        },
-      });
+      if (classText.length > 3000 && methods.length > 1) {
+        // Large class: emit summary chunk + per-method chunks
+        const summaryContent = this.buildClassSummary(cls);
+        chunks.push({
+          content: summaryContent,
+          startLine: cls.getStartLineNumber(),
+          endLine: cls.getEndLineNumber(),
+          language,
+          type: 'code',
+          symbols: [name, ...methodNames],
+          imports: chunks.length === 0 ? imports : undefined,
+          metadata: {
+            kind: 'class-summary',
+            extends: cls.getExtends()?.getText(),
+            implements: cls.getImplements().map(i => i.getText()),
+            exported: cls.isExported(),
+            ...(jsdoc ? { jsdoc } : {}),
+          },
+        });
+
+        // Per-method chunks
+        for (const method of methods) {
+          const methodJsdoc = method.getJsDocs().map(d => d.getDescription()).filter(Boolean).join('\n');
+          chunks.push({
+            content: method.getFullText(),
+            startLine: method.getStartLineNumber(),
+            endLine: method.getEndLineNumber(),
+            language,
+            type: 'code',
+            symbols: [`${name}.${method.getName()}`],
+            imports: undefined,
+            metadata: {
+              kind: 'method',
+              className: name,
+              exported: cls.isExported(),
+              ...(methodJsdoc ? { jsdoc: methodJsdoc } : {}),
+            },
+          });
+        }
+      } else {
+        // Small class: emit as single chunk (existing behavior)
+        chunks.push({
+          content: classText,
+          startLine: cls.getStartLineNumber(),
+          endLine: cls.getEndLineNumber(),
+          language,
+          type: 'code',
+          symbols: [name, ...methodNames],
+          imports: chunks.length === 0 ? imports : undefined,
+          metadata: {
+            kind: 'class',
+            extends: cls.getExtends()?.getText(),
+            implements: cls.getImplements().map(i => i.getText()),
+            exported: cls.isExported(),
+            ...(jsdoc ? { jsdoc } : {}),
+          },
+        });
+      }
     }
 
     // Extract standalone functions
@@ -369,6 +413,48 @@ export class CodeParser implements FileParser {
     }
 
     return [...symbols];
+  }
+
+  /**
+   * Build a class summary: declaration line, properties, and method signatures (no bodies).
+   */
+  private buildClassSummary(cls: import('ts-morph').ClassDeclaration): string {
+    const lines: string[] = [];
+
+    // Class declaration line
+    const name = cls.getName() || 'anonymous';
+    const extendsClause = cls.getExtends()?.getText();
+    const implementsClauses = cls.getImplements().map(i => i.getText());
+    let decl = cls.isExported() ? 'export ' : '';
+    decl += `class ${name}`;
+    if (extendsClause) decl += ` extends ${extendsClause}`;
+    if (implementsClauses.length > 0) decl += ` implements ${implementsClauses.join(', ')}`;
+    decl += ' {';
+    lines.push(decl);
+
+    // Properties
+    for (const prop of cls.getProperties()) {
+      lines.push('  ' + prop.getText().replace(/\s*=\s*[\s\S]*$/, '') + ';');
+    }
+
+    if (cls.getProperties().length > 0) lines.push('');
+
+    // Method signatures (no bodies)
+    for (const method of cls.getMethods()) {
+      const modifiers = method.getModifiers().map(m => m.getText()).join(' ');
+      const params = method.getParameters().map(p => p.getText()).join(', ');
+      const returnType = method.getReturnTypeNode()?.getText();
+      const async = method.isAsync() ? 'async ' : '';
+      let sig = '  ';
+      if (modifiers) sig += modifiers + ' ';
+      sig += `${async}${method.getName()}(${params})`;
+      if (returnType) sig += `: ${returnType}`;
+      sig += ';';
+      lines.push(sig);
+    }
+
+    lines.push('}');
+    return lines.join('\n');
   }
 
   extractImports(content: string): string[] {

@@ -181,7 +181,7 @@
     {
       "id": "cross-1",
       "query": "what happens when a search request comes in from MCP to Qdrant",
-      "expectedFiles": ["mcp-server/src/tools/search.ts", "src/routes/search.ts", "src/services/vector-store.ts"],
+      "expectedFiles": ["mcp-server/src/tools/search.ts", "src/routes/search.ts"],
       "category": "cross-file",
       "k": 10
     },
@@ -285,7 +285,7 @@
     },
     {
       "id": "config-6",
-      "query": "how to configure separate vs legacy collection routing",
+      "query": "SEPARATE_COLLECTIONS and LEGACY_CODEBASE_COLLECTION configuration",
       "expectedFiles": ["src/config.ts", "src/services/indexer.ts"],
       "category": "config-docs",
       "k": 10

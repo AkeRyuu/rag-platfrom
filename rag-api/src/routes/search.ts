@@ -3,7 +3,7 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { vectorStore } from '../services/vector-store';
+import { vectorStore, SearchResult } from '../services/vector-store';
 import { embeddingService } from '../services/embedding';
 import { llm } from '../services/llm';
 import { contextPackBuilder } from '../services/context-pack';
@@ -26,6 +26,33 @@ import config from '../config';
 const router = Router();
 
 /**
+ * Deduplicate search results by file — keep only the highest-scoring chunk per file.
+ */
+function deduplicateByFile<T extends { payload: Record<string, unknown>; score: number }>(results: T[]): T[] {
+  const seen = new Map<string, T>();
+  for (const r of results) {
+    const file = r.payload.file as string;
+    if (!file) { seen.set(`__no_file_${seen.size}`, r); continue; }
+    const existing = seen.get(file);
+    if (!existing || r.score > existing.score) {
+      seen.set(file, r);
+    }
+  }
+  return Array.from(seen.values());
+}
+
+/**
+ * Apply code-type boosting — give a small score boost to code chunks over docs.
+ */
+const CODE_BOOST = 1.05;
+function applyChunkTypeBoost<T extends { payload: Record<string, unknown>; score: number }>(results: T[]): T[] {
+  return results.map(r => ({
+    ...r,
+    score: r.payload?.chunkType === 'code' ? r.score * CODE_BOOST : r.score,
+  }));
+}
+
+/**
  * Search in a collection
  * POST /api/search
  */
@@ -34,7 +61,11 @@ router.post('/search', validate(searchSchema), asyncHandler(async (req: Request,
 
   const queryEmbedding = await embeddingService.embed(query);
   const filter = buildSearchFilter(filters);
-  const results = await vectorStore.search(collection, queryEmbedding, limit, filter, scoreThreshold);
+  // Over-fetch to allow dedup to still return enough results
+  const rawResults = await vectorStore.search(collection, queryEmbedding, limit * 3, filter, scoreThreshold);
+  const boosted = applyChunkTypeBoost(rawResults);
+  boosted.sort((a, b) => b.score - a.score);
+  const results = deduplicateByFile(boosted).slice(0, limit);
 
   res.json({
     results: results.map(r => ({
@@ -108,7 +139,10 @@ router.post('/search-hybrid', validate(searchHybridSchema), asyncHandler(async (
   // Native sparse hybrid search (when enabled)
   if (config.SPARSE_VECTORS_ENABLED) {
     const { dense, sparse } = await embeddingService.embedFull(query);
-    const results = await vectorStore.searchHybridNative(collection, dense, sparse, limit, filter);
+    const rawResults = await vectorStore.searchHybridNative(collection, dense, sparse, limit * 3, filter);
+    const boosted = applyChunkTypeBoost(rawResults);
+    boosted.sort((a, b) => b.score - a.score);
+    const results = deduplicateByFile(boosted).slice(0, limit);
 
     return res.json({
       results: results.map(r => ({
@@ -169,15 +203,22 @@ router.post('/search-hybrid', validate(searchHybridSchema), asyncHandler(async (
     }
   }
 
-  const combinedResults = Array.from(resultMap.values())
+  const fusedResults = Array.from(resultMap.values())
     .map(({ result, semanticScore, keywordScore }) => ({
       ...result,
       score: semanticWeight * semanticScore + (1 - semanticWeight) * keywordScore,
       semanticScore,
       keywordScore,
-    }))
-    .sort((a, b) => b.score - a.score)
-    .slice(0, limit);
+    }));
+
+  // Apply code-type boost, re-sort, dedup, trim
+  const boostedFused = applyChunkTypeBoost(fusedResults).map(r => ({
+    ...r,
+    semanticScore: (r as any).semanticScore as number,
+    keywordScore: (r as any).keywordScore as number,
+  }));
+  boostedFused.sort((a, b) => b.score - a.score);
+  const combinedResults = deduplicateByFile(boostedFused).slice(0, limit);
 
   res.json({
     results: combinedResults.map(r => ({
@@ -185,8 +226,8 @@ router.post('/search-hybrid', validate(searchHybridSchema), asyncHandler(async (
       content: r.payload.content,
       language: r.payload.language,
       score: r.score,
-      semanticScore: r.semanticScore,
-      keywordScore: r.keywordScore,
+      semanticScore: (r as any).semanticScore,
+      keywordScore: (r as any).keywordScore,
     })),
     query,
     semanticWeight,
@@ -202,7 +243,8 @@ router.post('/ask', validate(askSchema), asyncHandler(async (req: Request, res: 
   const { collection, question } = req.body;
 
   const queryEmbedding = await embeddingService.embed(question);
-  const searchResults = await vectorStore.search(collection, queryEmbedding, 8);
+  const rawResults = await vectorStore.search(collection, queryEmbedding, 24);
+  const searchResults = deduplicateByFile(applyChunkTypeBoost(rawResults).sort((a, b) => b.score - a.score)).slice(0, 8);
 
   if (searchResults.length === 0) {
     return res.json({
