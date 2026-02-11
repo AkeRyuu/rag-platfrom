@@ -373,7 +373,7 @@ export async function indexProject(options: IndexOptions): Promise<IndexStats> {
 
     // Process files in batches with batch embedding
     const fileBatchSize = 20; // Files per batch
-    const embeddingBatchSize = 100; // Chunks per embedding batch
+    const embeddingBatchSize = 8; // Chunks per embedding batch (keep small for BGE-M3 memory)
 
     for (let i = 0; i < filesToIndex.length; i += fileBatchSize) {
       const fileBatch = filesToIndex.slice(i, i + fileBatchSize);
