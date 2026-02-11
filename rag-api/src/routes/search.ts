@@ -150,6 +150,8 @@ router.post('/search-hybrid', validate(searchHybridSchema), asyncHandler(async (
         content: r.payload.content,
         language: r.payload.language,
         score: r.score,
+        semanticScore: r.score,
+        keywordScore: r.score,
       })),
       query,
       mode: 'native-sparse',

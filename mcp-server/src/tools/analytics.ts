@@ -122,13 +122,13 @@ export function createAnalyticsTools(projectName: string): ToolModule {
       let result = `## Tool Analytics\n\n`;
       result += `- **Total Calls:** ${data.totalCalls ?? "N/A"}\n`;
       result += `- **Success Rate:** ${data.successRate !== undefined ? pct(data.successRate) : "N/A"}\n`;
-      result += `- **Avg Duration:** ${data.avgDuration ? data.avgDuration + "ms" : "N/A"}\n\n`;
+      result += `- **Avg Duration:** ${data.avgDurationMs ? data.avgDurationMs + "ms" : "N/A"}\n\n`;
 
       if (data.topTools && data.topTools.length > 0) {
         result += `### Top Tools\n`;
         for (const t of data.topTools) {
-          result += `- **${t.name}**: ${t.calls} calls`;
-          if (t.avgDuration) result += ` (avg ${t.avgDuration}ms)`;
+          result += `- **${t.tool || t.name}**: ${t.count ?? t.calls} calls`;
+          if (t.avgDurationMs || t.avgDuration) result += ` (avg ${t.avgDurationMs || t.avgDuration}ms)`;
           result += "\n";
         }
         result += "\n";

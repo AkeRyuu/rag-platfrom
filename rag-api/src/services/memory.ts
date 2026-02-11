@@ -528,46 +528,77 @@ class MemoryService {
         if (clusters.length >= limit) break;
       }
 
-      // Merge each cluster
-      for (const cluster of clusters) {
-        const mergedContent = await this.llmMergeMemories(cluster);
+      // Merge clusters in parallel batches to avoid timeout
+      const BATCH_SIZE = 3;
+      const PER_MERGE_TIMEOUT = 30000;
+      const mergeStartTime = Date.now();
+      const OVERALL_TIMEOUT = 90000; // Leave buffer for HTTP response
 
-        const mergedMemory: Memory = {
-          id: uuidv4(),
-          type: cluster[0].type,
-          content: mergedContent,
-          tags: [...new Set(cluster.flatMap(m => m.tags))],
-          relatedTo: cluster.find(m => m.relatedTo)?.relatedTo,
-          createdAt: cluster.reduce((earliest, m) =>
-            m.createdAt < earliest ? m.createdAt : earliest, cluster[0].createdAt),
-          updatedAt: new Date().toISOString(),
-          metadata: {
-            mergedFrom: cluster.map(m => m.id),
-            mergedAt: new Date().toISOString(),
-            originalCount: cluster.length,
-          },
-        };
-
-        result.merged.push({ original: cluster, merged: mergedMemory });
-
-        if (!dryRun) {
-          // Create merged memory
-          const embedding = await embeddingService.embed(
-            `${mergedMemory.type}: ${mergedMemory.content}${mergedMemory.relatedTo ? ` (related to: ${mergedMemory.relatedTo})` : ''}`
-          );
-
-          await vectorStore.upsert(collectionName, [{
-            id: mergedMemory.id,
-            vector: embedding,
-            payload: { ...mergedMemory, project: projectName },
-          }]);
-
-          // Delete original memories
-          const idsToDelete = cluster.map(m => m.id);
-          await vectorStore.delete(collectionName, idsToDelete);
+      for (let i = 0; i < clusters.length; i += BATCH_SIZE) {
+        if (Date.now() - mergeStartTime > OVERALL_TIMEOUT) {
+          logger.warn('Memory merge: approaching timeout, stopping early', {
+            processed: result.totalMerged,
+            remaining: clusters.length - i,
+          });
+          break;
         }
 
-        result.totalMerged++;
+        const batch = clusters.slice(i, i + BATCH_SIZE);
+        const mergeResults = await Promise.allSettled(
+          batch.map(cluster =>
+            Promise.race([
+              this.llmMergeMemories(cluster),
+              new Promise<never>((_, reject) =>
+                setTimeout(() => reject(new Error('LLM merge timeout')), PER_MERGE_TIMEOUT)
+              ),
+            ])
+          )
+        );
+
+        for (let j = 0; j < batch.length; j++) {
+          const cluster = batch[j];
+          const mergeResult = mergeResults[j];
+
+          // On timeout/error, fallback to concatenation
+          const mergedContent = mergeResult.status === 'fulfilled'
+            ? mergeResult.value
+            : [...new Set(cluster.map(m => m.content.trim()))].join(' | ');
+
+          const mergedMemory: Memory = {
+            id: uuidv4(),
+            type: cluster[0].type,
+            content: mergedContent,
+            tags: [...new Set(cluster.flatMap(m => m.tags))],
+            relatedTo: cluster.find(m => m.relatedTo)?.relatedTo,
+            createdAt: cluster.reduce((earliest, m) =>
+              m.createdAt < earliest ? m.createdAt : earliest, cluster[0].createdAt),
+            updatedAt: new Date().toISOString(),
+            metadata: {
+              mergedFrom: cluster.map(m => m.id),
+              mergedAt: new Date().toISOString(),
+              originalCount: cluster.length,
+            },
+          };
+
+          result.merged.push({ original: cluster, merged: mergedMemory });
+
+          if (!dryRun) {
+            const embedding = await embeddingService.embed(
+              `${mergedMemory.type}: ${mergedMemory.content}${mergedMemory.relatedTo ? ` (related to: ${mergedMemory.relatedTo})` : ''}`
+            );
+
+            await vectorStore.upsert(collectionName, [{
+              id: mergedMemory.id,
+              vector: embedding,
+              payload: { ...mergedMemory, project: projectName },
+            }]);
+
+            const idsToDelete = cluster.map(m => m.id);
+            await vectorStore.delete(collectionName, idsToDelete);
+          }
+
+          result.totalMerged++;
+        }
       }
 
       logger.info(`Memory merge: ${result.totalMerged} clusters${dryRun ? ' (dry run)' : ' merged'}`, { projectName });

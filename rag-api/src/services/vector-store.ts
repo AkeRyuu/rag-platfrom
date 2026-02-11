@@ -941,8 +941,11 @@ class VectorStoreService {
           if (processed.has(point.id as string)) continue;
           if (checked >= limit) break;
 
-          const vector = point.vector as number[];
-          if (!vector) continue;
+          const rawVector = point.vector;
+          const vector = Array.isArray(rawVector)
+            ? rawVector as number[]
+            : (rawVector as any)?.dense as number[] | undefined;
+          if (!vector || !Array.isArray(vector)) continue;
 
           // Find similar vectors
           const similar = await this.search(collection, vector, 5, undefined, threshold);

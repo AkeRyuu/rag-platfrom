@@ -301,7 +301,7 @@ export function createSearchTools(projectName: string): ToolModule {
       return results
         .map(
           (r: any) =>
-            `**${r.file}** (combined: ${pct(r.score)}, semantic: ${pct(r.semanticScore)}, keyword: ${pct(r.keywordScore)})\n` +
+            `**${r.file}** (combined: ${pct(r.score)}${r.semanticScore != null ? `, semantic: ${pct(r.semanticScore)}` : ''}${r.keywordScore != null ? `, keyword: ${pct(r.keywordScore)}` : ''})\n` +
             "```" +
             (r.language || "") +
             "\n" +

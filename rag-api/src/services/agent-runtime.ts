@@ -187,14 +187,15 @@ class AgentRuntime {
     messages.push({ role: 'user', content: userPrompt });
 
     for (let iteration = 1; iteration <= maxIterations; iteration++) {
-      if (Date.now() > deadline) {
+      const remaining = deadline - Date.now();
+      if (remaining <= 5000) {
         throw new Error('AGENT_TIMEOUT');
       }
 
       agentTask.usage.iterations = iteration;
 
-      // Call LLM
-      const response = await this.chatWithOllama(messages, profile.temperature);
+      // Call LLM with dynamic timeout based on remaining time
+      const response = await this.chatWithOllama(messages, profile.temperature, remaining);
       agentTask.usage.totalTokens += (response.promptTokens || 0) + (response.completionTokens || 0);
 
       const assistantContent = response.text;
@@ -281,9 +282,13 @@ class AgentRuntime {
 
   private async chatWithOllama(
     messages: ChatMessage[],
-    temperature: number
+    temperature: number,
+    remainingMs?: number
   ): Promise<{ text: string; promptTokens: number; completionTokens: number }> {
     try {
+      const timeout = remainingMs
+        ? Math.min(60000, remainingMs - 1000)
+        : 60000;
       const response = await axios.post<OllamaResponse>(
         `${config.OLLAMA_URL}/api/chat`,
         {
@@ -295,7 +300,7 @@ class AgentRuntime {
             num_predict: 4096,
           },
         },
-        { timeout: 60000 }
+        { timeout }
       );
 
       return {
