@@ -450,13 +450,19 @@ class VectorStoreService {
     filter?: Record<string, unknown>,
     scoreThreshold?: number
   ): Promise<SearchResult[]> {
+    const searchParams = {
+      limit,
+      with_payload: true,
+      filter: filter as any,
+      score_threshold: scoreThreshold,
+    };
+
     try {
+      // Try named vector first (for collections with sparse vector support)
+      const namedVector = { name: 'dense', vector } as any;
       const results = await this.client.search(collection, {
-        vector,
-        limit,
-        with_payload: true,
-        filter: filter as any,
-        score_threshold: scoreThreshold,
+        vector: namedVector,
+        ...searchParams,
       });
 
       return results.map(r => ({
@@ -467,6 +473,18 @@ class VectorStoreService {
     } catch (error: any) {
       if (error.status === 404) {
         return [];
+      }
+      // Fall back to anonymous vector (collections without named vectors)
+      if (error.message?.includes('Bad Request') || error.status === 400) {
+        const results = await this.client.search(collection, {
+          vector,
+          ...searchParams,
+        });
+        return results.map(r => ({
+          id: r.id as string,
+          score: r.score,
+          payload: r.payload as Record<string, unknown>,
+        }));
       }
       throw error;
     }
@@ -485,8 +503,9 @@ class VectorStoreService {
     scoreThreshold?: number
   ): Promise<{ group: string; results: SearchResult[] }[]> {
     try {
+      const namedVector = { name: 'dense', vector } as any;
       const response = await this.client.searchPointGroups(collection, {
-        vector,
+        vector: namedVector,
         group_by: groupBy,
         limit,
         group_size: groupSize,
