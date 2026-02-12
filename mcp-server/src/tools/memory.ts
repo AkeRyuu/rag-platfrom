@@ -3,7 +3,7 @@
  *
  * Tools: remember, recall, list_memories, forget, update_todo,
  *        batch_remember, validate_memory, review_memories,
- *        promote_memory, run_quality_gates
+ *        promote_memory, run_quality_gates, memory_maintenance
  */
 
 import type { ToolModule, ToolContext } from "../types.js";
@@ -317,6 +317,14 @@ export function createMemoryTools(projectName: string): ToolModule {
         },
       },
     },
+    {
+      name: "memory_maintenance",
+      description: `Run feedback-driven memory maintenance for ${projectName}: auto-promote memories with 3+ positive feedback, auto-prune memories with 2+ incorrect feedback.`,
+      inputSchema: {
+        type: "object" as const,
+        properties: {},
+      },
+    },
   ];
 
   const handlers: Record<
@@ -588,6 +596,40 @@ export function createMemoryTools(projectName: string): ToolModule {
             result += `\n  ... and ${report.blastRadius.affectedFiles.length - 10} more`;
           }
         }
+      }
+
+      return result;
+    },
+
+    // ----- memory_maintenance -----
+    async memory_maintenance(args, ctx) {
+      const response = await ctx.api.post("/api/memory/maintenance", {
+        projectName: ctx.projectName,
+      });
+
+      const { promoted, pruned, errors } = response.data;
+      let result = `# \u{1F9F9} Memory Maintenance Results\n\n`;
+
+      if (promoted.length > 0) {
+        result += `**Promoted** (${promoted.length}): memories with 3+ positive feedback moved to durable\n`;
+        promoted.forEach((id: string) => { result += `  \u2705 ${id}\n`; });
+        result += `\n`;
+      }
+
+      if (pruned.length > 0) {
+        result += `**Pruned** (${pruned.length}): memories with 2+ incorrect feedback removed\n`;
+        pruned.forEach((id: string) => { result += `  \u{1F5D1}\u{FE0F} ${id}\n`; });
+        result += `\n`;
+      }
+
+      if (errors.length > 0) {
+        result += `**Errors** (${errors.length}):\n`;
+        errors.forEach((e: string) => { result += `  \u26A0\u{FE0F} ${e}\n`; });
+        result += `\n`;
+      }
+
+      if (promoted.length === 0 && pruned.length === 0) {
+        result += `No memories needed maintenance. All feedback thresholds are below auto-action levels.\n`;
       }
 
       return result;

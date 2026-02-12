@@ -347,4 +347,18 @@ router.post('/quality/blast-radius', validateProjectName, asyncHandler(async (re
   res.json(result);
 }));
 
+// ============================================
+// Feedback-Driven Memory Maintenance
+// ============================================
+
+/**
+ * Run feedback-based memory maintenance (auto-promote + auto-prune)
+ * POST /api/memory/maintenance
+ */
+router.post('/memory/maintenance', validateProjectName, asyncHandler(async (req: Request, res: Response) => {
+  const { projectName } = req.body;
+  const result = await memoryGovernance.runFeedbackMaintenance(projectName);
+  res.json(result);
+}));
+
 export default router;

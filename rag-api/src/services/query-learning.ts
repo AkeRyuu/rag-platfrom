@@ -235,6 +235,51 @@ class QueryLearningService {
     return { issues, suggestions };
   }
 
+  /**
+   * Auto-rewrite a query if it's similar to a previously unsuccessful one.
+   * Returns the rewritten query, or the original if no rewrite is applicable.
+   */
+  async autoRewriteQuery(options: {
+    projectName: string;
+    query: string;
+    minConfidence?: number;
+  }): Promise<{ query: string; rewritten: boolean; reason?: string }> {
+    const { projectName, query, minConfidence = 0.7 } = options;
+
+    try {
+      // 1. Check feedback-based rewrites (highest priority)
+      const feedbackSuggestions = await feedbackService.getSuggestedQueries(
+        projectName,
+        query,
+        1
+      );
+
+      if (feedbackSuggestions.length > 0 && feedbackSuggestions[0].score >= minConfidence) {
+        return {
+          query: feedbackSuggestions[0].betterQuery,
+          rewritten: true,
+          reason: `Rewritten from feedback (score: ${feedbackSuggestions[0].score.toFixed(2)})`,
+        };
+      }
+
+      // 2. Check learned patterns
+      const patternSuggestions = await this.matchPatterns(projectName, query);
+      const bestPattern = patternSuggestions.find(s => s.confidence >= minConfidence);
+      if (bestPattern) {
+        return {
+          query: bestPattern.suggestedQuery,
+          rewritten: true,
+          reason: bestPattern.reason,
+        };
+      }
+
+      return { query, rewritten: false };
+    } catch (error: any) {
+      logger.error('Auto-rewrite failed, using original query', { error: error.message });
+      return { query, rewritten: false };
+    }
+  }
+
   // ============================================
   // Private Helpers
   // ============================================

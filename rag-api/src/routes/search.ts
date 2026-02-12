@@ -7,6 +7,8 @@ import { vectorStore, SearchResult } from '../services/vector-store';
 import { embeddingService } from '../services/embedding';
 import { llm } from '../services/llm';
 import { contextPackBuilder } from '../services/context-pack';
+import { feedbackService } from '../services/feedback';
+import { queryLearning } from '../services/query-learning';
 import { asyncHandler } from '../middleware/async-handler';
 import { validate } from '../utils/validation';
 import {
@@ -53,17 +55,42 @@ function applyChunkTypeBoost<T extends { payload: Record<string, unknown>; score
 }
 
 /**
+ * Apply feedback-based score adjustments — boost helpful files, penalize not_helpful.
+ */
+function applyFeedbackBoost<T extends { payload: Record<string, unknown>; score: number }>(
+  results: T[],
+  boostScores: Map<string, number>
+): T[] {
+  if (boostScores.size === 0) return results;
+  return results.map(r => {
+    const file = r.payload.file as string;
+    const boost = file ? boostScores.get(file) : undefined;
+    return boost ? { ...r, score: r.score * boost } : r;
+  });
+}
+
+/**
  * Search in a collection
  * POST /api/search
  */
 router.post('/search', validate(searchSchema), asyncHandler(async (req: Request, res: Response) => {
   const { collection, query, limit = 5, filters, scoreThreshold } = req.body;
+  const projectName = req.headers['x-project-name'] as string || collection.split('_')[0];
 
-  const queryEmbedding = await embeddingService.embed(query);
+  // Auto-rewrite query if similar to previously unsuccessful one
+  const { query: effectiveQuery, rewritten, reason } = await queryLearning.autoRewriteQuery({
+    projectName, query,
+  });
+
+  const [queryEmbedding, feedbackBoosts] = await Promise.all([
+    embeddingService.embed(effectiveQuery),
+    feedbackService.getFileBoostScores(projectName, effectiveQuery),
+  ]);
   const filter = buildSearchFilter(filters);
   // Over-fetch to allow dedup to still return enough results
   const rawResults = await vectorStore.search(collection, queryEmbedding, limit * 3, filter, scoreThreshold);
-  const boosted = applyChunkTypeBoost(rawResults);
+  let boosted = applyChunkTypeBoost(rawResults);
+  boosted = applyFeedbackBoost(boosted, feedbackBoosts);
   boosted.sort((a, b) => b.score - a.score);
   const results = deduplicateByFile(boosted).slice(0, limit);
 
@@ -76,6 +103,7 @@ router.post('/search', validate(searchSchema), asyncHandler(async (req: Request,
       startLine: r.payload.startLine,
       endLine: r.payload.endLine,
     })),
+    ...(rewritten ? { queryRewritten: { original: query, rewritten: effectiveQuery, reason } } : {}),
   });
 }));
 
@@ -133,14 +161,24 @@ router.post('/search-grouped', validate(searchGroupedSchema), asyncHandler(async
  */
 router.post('/search-hybrid', validate(searchHybridSchema), asyncHandler(async (req: Request, res: Response) => {
   const { collection, query, limit = 10, semanticWeight = 0.7, filters } = req.body;
+  const projectName = req.headers['x-project-name'] as string || collection.split('_')[0];
+
+  // Auto-rewrite query if similar to previously unsuccessful one
+  const { query: effectiveQuery, rewritten, reason } = await queryLearning.autoRewriteQuery({
+    projectName, query,
+  });
 
   const filter = buildSearchFilter(filters);
 
   // Native sparse hybrid search (when enabled)
   if (config.SPARSE_VECTORS_ENABLED) {
-    const { dense, sparse } = await embeddingService.embedFull(query);
+    const [{ dense, sparse }, feedbackBoosts] = await Promise.all([
+      embeddingService.embedFull(effectiveQuery),
+      feedbackService.getFileBoostScores(projectName, effectiveQuery),
+    ]);
     const rawResults = await vectorStore.searchHybridNative(collection, dense, sparse, limit * 3, filter);
-    const boosted = applyChunkTypeBoost(rawResults);
+    let boosted = applyChunkTypeBoost(rawResults);
+    boosted = applyFeedbackBoost(boosted, feedbackBoosts);
     boosted.sort((a, b) => b.score - a.score);
     const results = deduplicateByFile(boosted).slice(0, limit);
 
@@ -153,8 +191,9 @@ router.post('/search-hybrid', validate(searchHybridSchema), asyncHandler(async (
         semanticScore: r.score,
         keywordScore: r.score,
       })),
-      query,
+      query: effectiveQuery,
       mode: 'native-sparse',
+      ...(rewritten ? { queryRewritten: { original: query, rewritten: effectiveQuery, reason } } : {}),
     });
   }
 

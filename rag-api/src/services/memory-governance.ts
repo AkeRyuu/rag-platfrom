@@ -8,6 +8,7 @@ import { vectorStore, VectorPoint } from './vector-store';
 import { embeddingService } from './embedding';
 import { memoryService, Memory, MemoryType, MemorySource, CreateMemoryOptions, SearchMemoryOptions, MemorySearchResult } from './memory';
 import { qualityGates } from './quality-gates';
+import { feedbackService } from './feedback';
 import { logger } from '../utils/logger';
 import { memoryGovernanceTotal } from '../utils/metrics';
 
@@ -254,6 +255,102 @@ class MemoryGovernanceService {
       if (error.status === 404) return [];
       throw error;
     }
+  }
+  /**
+   * Auto-promote memories with 3+ positive feedback from quarantine to durable.
+   */
+  async autoPromoteByFeedback(projectName: string): Promise<{ promoted: string[]; errors: string[] }> {
+    const promoted: string[] = [];
+    const errors: string[] = [];
+
+    try {
+      const feedbackCounts = await feedbackService.getMemoryFeedbackCounts(projectName);
+
+      for (const [memoryId, counts] of feedbackCounts) {
+        if (counts.accurate >= 3) {
+          try {
+            await this.promote(projectName, memoryId, 'human_validated', `Auto-promoted: ${counts.accurate} accurate feedback`);
+            promoted.push(memoryId);
+          } catch (error: any) {
+            // Memory might not be in quarantine (already promoted or durable)
+            if (!error.message?.includes('not found in quarantine')) {
+              errors.push(`${memoryId}: ${error.message}`);
+            }
+          }
+        }
+      }
+
+      if (promoted.length > 0) {
+        logger.info(`Auto-promoted ${promoted.length} memories`, { project: projectName });
+      }
+    } catch (error: any) {
+      logger.error('Auto-promote failed', { error: error.message, project: projectName });
+    }
+
+    return { promoted, errors };
+  }
+
+  /**
+   * Auto-prune memories with 2+ incorrect feedback.
+   * Deletes from both quarantine and durable.
+   */
+  async autoPruneByFeedback(projectName: string): Promise<{ pruned: string[]; errors: string[] }> {
+    const pruned: string[] = [];
+    const errors: string[] = [];
+
+    try {
+      const feedbackCounts = await feedbackService.getMemoryFeedbackCounts(projectName);
+
+      for (const [memoryId, counts] of feedbackCounts) {
+        if (counts.incorrect >= 2) {
+          try {
+            // Try quarantine first
+            const quarantineCollection = this.getQuarantineCollection(projectName);
+            await vectorStore.delete(quarantineCollection, [memoryId]);
+            pruned.push(memoryId);
+            memoryGovernanceTotal.inc({ operation: 'prune', tier: 'quarantine', project: projectName });
+          } catch {
+            try {
+              // Then try durable
+              const durableCollection = this.getDurableCollection(projectName);
+              await vectorStore.delete(durableCollection, [memoryId]);
+              pruned.push(memoryId);
+              memoryGovernanceTotal.inc({ operation: 'prune', tier: 'durable', project: projectName });
+            } catch (error: any) {
+              errors.push(`${memoryId}: ${error.message}`);
+            }
+          }
+        }
+      }
+
+      if (pruned.length > 0) {
+        logger.info(`Auto-pruned ${pruned.length} memories`, { project: projectName });
+      }
+    } catch (error: any) {
+      logger.error('Auto-prune failed', { error: error.message, project: projectName });
+    }
+
+    return { pruned, errors };
+  }
+
+  /**
+   * Run both auto-promote and auto-prune in one pass.
+   */
+  async runFeedbackMaintenance(projectName: string): Promise<{
+    promoted: string[];
+    pruned: string[];
+    errors: string[];
+  }> {
+    const [promoteResult, pruneResult] = await Promise.all([
+      this.autoPromoteByFeedback(projectName),
+      this.autoPruneByFeedback(projectName),
+    ]);
+
+    return {
+      promoted: promoteResult.promoted,
+      pruned: pruneResult.pruned,
+      errors: [...promoteResult.errors, ...pruneResult.errors],
+    };
   }
 }
 

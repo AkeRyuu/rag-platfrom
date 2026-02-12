@@ -399,6 +399,86 @@ class FeedbackService {
     }
   }
 
+  /**
+   * Get feedback-based score adjustments for search results.
+   * Returns a map of filePath → boost multiplier (>1 = boost, <1 = penalty).
+   */
+  async getFileBoostScores(
+    projectName: string,
+    query: string
+  ): Promise<Map<string, number>> {
+    const collection = this.getSearchFeedbackCollection(projectName);
+    const boosts = new Map<string, number>();
+
+    try {
+      const embedding = await embeddingService.embed(query);
+      const results = await vectorStore.search(collection, embedding, 50, undefined, 0.5);
+
+      // Group feedback by file
+      const fileStats: Record<string, { helpful: number; notHelpful: number }> = {};
+      for (const r of results) {
+        const feedback = r.payload as unknown as SearchFeedback;
+        const file = feedback.resultFile;
+        if (!file) continue;
+
+        if (!fileStats[file]) fileStats[file] = { helpful: 0, notHelpful: 0 };
+        if (feedback.feedbackType === 'helpful') fileStats[file].helpful++;
+        else if (feedback.feedbackType === 'not_helpful') fileStats[file].notHelpful++;
+      }
+
+      // Calculate boost multipliers
+      for (const [file, stats] of Object.entries(fileStats)) {
+        const total = stats.helpful + stats.notHelpful;
+        if (total === 0) continue;
+
+        // Boost helpful files by up to 20%, penalize not_helpful by up to 15%
+        const ratio = (stats.helpful - stats.notHelpful) / total;
+        boosts.set(file, 1 + ratio * 0.2);
+      }
+
+      return boosts;
+    } catch (error: any) {
+      if (error.status === 404) return boosts;
+      logger.error('Failed to get file boost scores', { error: error.message });
+      return boosts;
+    }
+  }
+
+  /**
+   * Get memory IDs grouped by feedback type.
+   * Used by auto-promote (accurate) and auto-prune (incorrect).
+   */
+  async getMemoryFeedbackCounts(
+    projectName: string
+  ): Promise<Map<string, { accurate: number; outdated: number; incorrect: number }>> {
+    const collection = this.getMemoryFeedbackCollection(projectName);
+    const counts = new Map<string, { accurate: number; outdated: number; incorrect: number }>();
+
+    try {
+      const feedback = await this.scrollFeedback(collection, new Date(0));
+
+      for (const f of feedback) {
+        const payload = f as unknown as MemoryFeedback;
+        const memoryId = payload.memoryId;
+        if (!memoryId) continue;
+
+        if (!counts.has(memoryId)) {
+          counts.set(memoryId, { accurate: 0, outdated: 0, incorrect: 0 });
+        }
+        const stats = counts.get(memoryId)!;
+        if (payload.feedbackType === 'accurate') stats.accurate++;
+        else if (payload.feedbackType === 'outdated') stats.outdated++;
+        else if (payload.feedbackType === 'incorrect') stats.incorrect++;
+      }
+
+      return counts;
+    } catch (error: any) {
+      if (error.status === 404) return counts;
+      logger.error('Failed to get memory feedback counts', { error: error.message });
+      return counts;
+    }
+  }
+
   // ============================================
   // Private Helpers
   // ============================================
