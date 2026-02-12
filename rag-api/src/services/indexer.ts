@@ -659,7 +659,7 @@ export async function indexProject(options: IndexOptions): Promise<IndexStats> {
     progress.status = 'error';
     progress.error = error.message;
 
-    logger.error(`Indexing failed for ${projectName}`, { error: error.message });
+    logger.error(`Indexing failed for ${projectName}`, { error: error.message, stack: error.stack, data: error.data || error.response?.data });
     throw error;
   }
 }

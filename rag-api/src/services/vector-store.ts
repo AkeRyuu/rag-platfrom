@@ -248,10 +248,15 @@ class VectorStoreService {
       payload: p.payload,
     }));
 
-    await this.client.upsert(collection, {
-      wait: true,
-      points: formattedPoints,
-    });
+    // Sub-batch to avoid Qdrant payload size limit (32MB)
+    const BATCH_SIZE = 100;
+    for (let i = 0; i < formattedPoints.length; i += BATCH_SIZE) {
+      const batch = formattedPoints.slice(i, i + BATCH_SIZE);
+      await this.client.upsert(collection, {
+        wait: true,
+        points: batch,
+      });
+    }
 
     logger.debug(`Upserted ${points.length} points to ${collection}`);
   }
@@ -306,10 +311,15 @@ class VectorStoreService {
       payload: p.payload,
     }));
 
-    await this.client.upsert(collection, {
-      wait: true,
-      points: formattedPoints,
-    });
+    // Sparse vectors are large — use smaller batches to stay under Qdrant's 32MB limit
+    const BATCH_SIZE = 50;
+    for (let i = 0; i < formattedPoints.length; i += BATCH_SIZE) {
+      const batch = formattedPoints.slice(i, i + BATCH_SIZE);
+      await this.client.upsert(collection, {
+        wait: true,
+        points: batch,
+      });
+    }
 
     logger.debug(`Upserted ${points.length} sparse points to ${collection}`);
   }
