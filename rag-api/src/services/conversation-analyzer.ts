@@ -8,6 +8,7 @@
  * - Entities mentioned (files, functions, concepts)
  */
 
+import { Project } from 'ts-morph';
 import { llm } from './llm';
 import { memoryService, MemoryType } from './memory';
 import { memoryGovernance } from './memory-governance';
@@ -179,29 +180,74 @@ class ConversationAnalyzerService {
   }
 
   /**
-   * Quick extraction of just the entities from text
+   * Extract entities from text using regex for prose + ts-morph AST for code blocks.
    */
   async extractEntities(text: string): Promise<{
     files: string[];
     functions: string[];
     concepts: string[];
   }> {
-    // Simple regex-based extraction for speed
-    const files = [...text.matchAll(/(?:[\w/-]+\/)?[\w-]+\.(ts|js|tsx|jsx|py|go|rs|vue|json|yaml|yml|md)/g)]
-      .map(m => m[0])
-      .filter((v, i, a) => a.indexOf(v) === i);
+    const files = new Set<string>();
+    const functions = new Set<string>();
+    const concepts = new Set<string>();
 
-    const functions = [...text.matchAll(/(?:function|const|class|def|func)\s+(\w+)/g)]
-      .map(m => m[1])
-      .filter((v, i, a) => a.indexOf(v) === i);
+    // --- Regex extraction from prose ---
+    for (const m of text.matchAll(/(?:[\w/@.-]+\/)?[\w.-]+\.(ts|js|tsx|jsx|py|go|rs|vue|json|yaml|yml|md)/g)) {
+      files.add(m[0]);
+    }
 
-    // Extract PascalCase and camelCase identifiers as potential concepts
-    const concepts = [...text.matchAll(/\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\b/g)]
-      .map(m => m[1])
-      .filter((v, i, a) => a.indexOf(v) === i)
-      .slice(0, 10);
+    for (const m of text.matchAll(/(?:function|const|let|var|class|interface|type|enum|def|func)\s+(\w+)/g)) {
+      if (m[1].length > 1) functions.add(m[1]);
+    }
 
-    return { files, functions, concepts };
+    // Import specifiers: import { X, Y } from '...'
+    for (const m of text.matchAll(/import\s+\{([^}]+)\}/g)) {
+      for (const name of m[1].split(',').map(s => s.trim().split(/\s+as\s+/)[0])) {
+        if (name && name.length > 1) functions.add(name);
+      }
+    }
+
+    // Decorators: @Injectable, @Controller
+    for (const m of text.matchAll(/@(\w+)/g)) {
+      if (m[1].length > 2 && m[1][0] === m[1][0].toUpperCase()) concepts.add(m[1]);
+    }
+
+    // PascalCase identifiers as concepts
+    for (const m of text.matchAll(/\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\b/g)) {
+      concepts.add(m[1]);
+    }
+
+    // --- AST extraction from code blocks ---
+    const codeBlocks = [...text.matchAll(/```(?:ts|typescript|js|javascript)?\n([\s\S]*?)```/g)];
+    if (codeBlocks.length > 0) {
+      try {
+        const project = new Project({ useInMemoryFileSystem: true, compilerOptions: { allowJs: true } });
+        for (const block of codeBlocks.slice(0, 5)) {
+          const code = block[1];
+          if (code.length < 10 || code.length > 10000) continue;
+          try {
+            const sf = project.createSourceFile(`__extract_${Math.random()}.ts`, code);
+            for (const fn of sf.getFunctions()) { const n = fn.getName(); if (n) functions.add(n); }
+            for (const cls of sf.getClasses()) { const n = cls.getName(); if (n) functions.add(n); }
+            for (const ifc of sf.getInterfaces()) { const n = ifc.getName(); if (n) { functions.add(n); concepts.add(n); } }
+            for (const tp of sf.getTypeAliases()) { const n = tp.getName(); if (n) concepts.add(n); }
+            for (const en of sf.getEnums()) { const n = en.getName(); if (n) concepts.add(n); }
+            for (const vd of sf.getVariableDeclarations()) { const n = vd.getName(); if (n && n.length > 1) functions.add(n); }
+            sf.delete();
+          } catch {
+            // AST parse failed for this block, skip
+          }
+        }
+      } catch {
+        // ts-morph init failed, fall back to regex-only
+      }
+    }
+
+    return {
+      files: [...files],
+      functions: [...functions].slice(0, 30),
+      concepts: [...concepts].slice(0, 15),
+    };
   }
 }
 

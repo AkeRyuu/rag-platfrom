@@ -156,32 +156,59 @@ class MemoryService {
 
     const filter = mustConditions.length > 0 ? { must: mustConditions } : undefined;
 
+    // Over-fetch to compensate for aging and superseded filtering
     const results = await vectorStore.search(
       collectionName,
       embedding,
-      limit,
+      limit * 2,
       filter
     );
 
+    const now = Date.now();
+    const THIRTY_DAYS = 30 * 24 * 60 * 60 * 1000;
+
     return results
       .filter(r => !r.payload.supersededBy) // Exclude superseded memories
-      .map(r => ({
-        memory: {
-          id: r.id,
-          type: r.payload.type as MemoryType,
-          content: r.payload.content as string,
-          tags: (r.payload.tags as string[]) || [],
-          relatedTo: r.payload.relatedTo as string | undefined,
-          createdAt: r.payload.createdAt as string,
-          updatedAt: r.payload.updatedAt as string,
-          metadata: r.payload.metadata as Record<string, unknown> | undefined,
-          status: r.payload.status as TodoStatus | undefined,
-          statusHistory: r.payload.statusHistory as Memory['statusHistory'],
-          relationships: r.payload.relationships as MemoryRelation[] | undefined,
-          supersededBy: r.payload.supersededBy as string | undefined,
-        },
-        score: r.score,
-      }));
+      .map(r => {
+        let score = r.score;
+
+        // Memory aging: penalize memories older than 30 days without validation
+        const createdAt = r.payload.createdAt as string;
+        if (createdAt) {
+          const ageMs = now - new Date(createdAt).getTime();
+          if (ageMs > THIRTY_DAYS) {
+            const validated = r.payload.validated as boolean | undefined;
+            const promoted = !!(r.payload.metadata as Record<string, unknown> | undefined)?.promotedAt;
+            // Validated/promoted memories keep their score; others decay
+            if (!validated && !promoted) {
+              // Decay: 5% per 30 days past the first 30, max 25% penalty
+              const periodsOld = Math.floor(ageMs / THIRTY_DAYS) - 1;
+              const decay = Math.min(0.25, periodsOld * 0.05);
+              score *= (1 - decay);
+            }
+          }
+        }
+
+        return {
+          memory: {
+            id: r.id,
+            type: r.payload.type as MemoryType,
+            content: r.payload.content as string,
+            tags: (r.payload.tags as string[]) || [],
+            relatedTo: r.payload.relatedTo as string | undefined,
+            createdAt: r.payload.createdAt as string,
+            updatedAt: r.payload.updatedAt as string,
+            metadata: r.payload.metadata as Record<string, unknown> | undefined,
+            status: r.payload.status as TodoStatus | undefined,
+            statusHistory: r.payload.statusHistory as Memory['statusHistory'],
+            relationships: r.payload.relationships as MemoryRelation[] | undefined,
+            supersededBy: r.payload.supersededBy as string | undefined,
+          },
+          score,
+        };
+      })
+      .sort((a, b) => b.score - a.score)
+      .slice(0, limit);
   }
 
   /**

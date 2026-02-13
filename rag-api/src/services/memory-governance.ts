@@ -20,12 +20,68 @@ export interface IngestOptions extends CreateMemoryOptions {
 }
 
 class MemoryGovernanceService {
+  // Cache adaptive thresholds per project (refresh every 30 min)
+  private thresholdCache = new Map<string, { value: number; expiresAt: number }>();
+
   private getQuarantineCollection(projectName: string): string {
     return `${projectName}_memory_pending`;
   }
 
   private getDurableCollection(projectName: string): string {
     return `${projectName}_agent_memory`;
+  }
+
+  /**
+   * Compute adaptive confidence threshold from promotion/rejection history.
+   * High success rate → lower threshold (accept more). High rejection → raise threshold.
+   * Range: [0.4, 0.8], default 0.5.
+   */
+  async getAdaptiveThreshold(projectName: string): Promise<number> {
+    const cached = this.thresholdCache.get(projectName);
+    if (cached && cached.expiresAt > Date.now()) return cached.value;
+
+    const DEFAULT = 0.5;
+    try {
+      const quarantine = this.getQuarantineCollection(projectName);
+      const durable = this.getDurableCollection(projectName);
+
+      // Count promoted (durable with originalSource=auto_*)
+      let promoted = 0;
+      try {
+        const durableResults = await vectorStore['client'].scroll(durable, {
+          limit: 200, with_payload: true, with_vector: false,
+          filter: { must: [{ key: 'metadata.originalSource', match: { text: 'auto_' } }] },
+        });
+        promoted = durableResults.points.length;
+      } catch { /* collection may not exist */ }
+
+      // Count still in quarantine (rejected or pending)
+      let pending = 0;
+      try {
+        const pendingResults = await vectorStore['client'].scroll(quarantine, {
+          limit: 200, with_payload: false, with_vector: false,
+        });
+        pending = pendingResults.points.length;
+      } catch { /* collection may not exist */ }
+
+      const total = promoted + pending;
+      if (total < 5) {
+        this.thresholdCache.set(projectName, { value: DEFAULT, expiresAt: Date.now() + 30 * 60 * 1000 });
+        return DEFAULT;
+      }
+
+      const successRate = promoted / total;
+      // Map success rate to threshold: high success → lower threshold
+      // successRate 0.0 → 0.8, successRate 1.0 → 0.4
+      const threshold = Math.max(0.4, Math.min(0.8, 0.8 - successRate * 0.4));
+
+      this.thresholdCache.set(projectName, { value: threshold, expiresAt: Date.now() + 30 * 60 * 1000 });
+      logger.debug(`Adaptive threshold for ${projectName}: ${threshold.toFixed(2)} (${promoted}/${total} promoted)`, { project: projectName });
+      return threshold;
+    } catch (err: any) {
+      logger.debug('Adaptive threshold computation failed, using default', { error: err.message });
+      return DEFAULT;
+    }
   }
 
   /**
@@ -44,7 +100,22 @@ class MemoryGovernanceService {
       return memoryService.remember(memoryOptions);
     }
 
-    // Auto-generated → quarantine
+    // Auto-generated → check adaptive threshold, then quarantine
+    const threshold = await this.getAdaptiveThreshold(projectName);
+    if (confidence !== undefined && confidence < threshold) {
+      logger.debug(`Memory below adaptive threshold (${confidence} < ${threshold.toFixed(2)}), skipped`, { project: projectName });
+      // Return a stub memory without persisting
+      return {
+        id: uuidv4(),
+        type: memoryOptions.type || 'note',
+        content: memoryOptions.content,
+        tags: memoryOptions.tags || [],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        metadata: { skipped: true, reason: 'below_threshold', threshold, confidence },
+      };
+    }
+
     memoryGovernanceTotal.inc({ operation: 'ingest', tier: 'quarantine', project: projectName });
     const collectionName = this.getQuarantineCollection(projectName);
 

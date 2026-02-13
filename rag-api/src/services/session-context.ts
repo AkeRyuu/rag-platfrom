@@ -137,6 +137,11 @@ class SessionContextService {
       logger.debug('Background prefetch failed', { error: err.message })
     );
 
+    // Background: auto-merge similar memories to prevent bloat
+    this.triggerAutoMerge(projectName).catch(err =>
+      logger.debug('Background auto-merge failed', { error: err.message })
+    );
+
     // Build briefing with project profile + recalled context
     try {
       const briefing = await this.buildSessionBriefing(context);
@@ -493,6 +498,31 @@ class SessionContextService {
     }
 
     return parts.length > 0 ? parts.join('\n') : null;
+  }
+
+  /**
+   * Trigger auto-merge of similar durable memories (fire-and-forget).
+   * Runs at most once per hour per project via simple time tracking.
+   */
+  private lastMergeTime = new Map<string, number>();
+
+  private async triggerAutoMerge(projectName: string): Promise<void> {
+    const lastMerge = this.lastMergeTime.get(projectName) || 0;
+    if (Date.now() - lastMerge < 60 * 60 * 1000) return; // Skip if merged < 1h ago
+
+    this.lastMergeTime.set(projectName, Date.now());
+
+    const result = await memoryService.mergeMemories({
+      projectName,
+      type: 'all',
+      threshold: 0.9,
+      dryRun: false,
+      limit: 50,
+    });
+
+    if (result.totalMerged > 0) {
+      logger.info(`Auto-merged ${result.totalMerged} memory clusters on session start`, { project: projectName });
+    }
   }
 
   /**
