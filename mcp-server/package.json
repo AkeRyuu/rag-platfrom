@@ -1,5 +1,5 @@
 {
-  "name": "@shared/rag-mcp-server",
+  "name": "@crowley/rag-mcp",
   "version": "1.0.0",
   "description": "Universal RAG MCP Server for any project",
   "type": "module",
@@ -7,11 +7,28 @@
   "bin": {
     "rag-mcp": "dist/index.js"
   },
+  "files": [
+    "dist/"
+  ],
   "scripts": {
     "build": "tsc",
     "dev": "tsc -w",
-    "start": "node dist/index.js"
+    "start": "node dist/index.js",
+    "prepublishOnly": "npm run build"
   },
+  "keywords": [
+    "mcp",
+    "rag",
+    "model-context-protocol",
+    "ai",
+    "embeddings",
+    "vector-search"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AKerby/shared-ai-infra.git"
+  },
+  "license": "MIT",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
     "axios": "^1.6.0"
