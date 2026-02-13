@@ -7,11 +7,12 @@
 ## Option 1: Claude Code CLI (recommended)
 
 ```bash
-claude mcp add rag -- npx -y @crowley/rag-mcp \
+claude mcp add \
   --env RAG_API_URL=https://rag.akeryuu.com \
   --env RAG_API_KEY=<your-api-key> \
   --env PROJECT_NAME=myproject \
-  --env PROJECT_PATH=/path/to/project
+  --env PROJECT_PATH=/path/to/project \
+  rag -- npx -y @crowley/rag-mcp
 ```
 
 ## Option 2: Manual `.mcp.json`
