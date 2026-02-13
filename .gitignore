@@ -31,5 +31,8 @@ docker/data/
 .cache/
 *.cache
 
+# Test coverage
+coverage/
+
 # MCP config (contains API keys)
 .mcp.json
