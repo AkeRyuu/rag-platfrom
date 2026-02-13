@@ -13,6 +13,7 @@ import { recordHttpRequest, getMetrics, getMetricsContentType } from './utils/me
 import { vectorStore } from './services/vector-store';
 import { cacheService } from './services/cache';
 import { errorHandler } from './middleware/error-handler';
+import { authMiddleware } from './middleware/auth';
 import searchRoutes from './routes/search';
 import indexRoutes from './routes/index';
 import memoryRoutes from './routes/memory';
@@ -59,6 +60,9 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 
   next();
 });
+
+// API key authentication (skips /health and /metrics)
+app.use(authMiddleware);
 
 // Health check
 app.get('/health', async (req: Request, res: Response) => {

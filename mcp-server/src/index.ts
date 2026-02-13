@@ -47,10 +47,11 @@ import { createAgentTools } from "./tools/agents.js";
 const PROJECT_NAME = process.env.PROJECT_NAME || "default";
 const PROJECT_PATH = process.env.PROJECT_PATH || process.cwd();
 const RAG_API_URL = process.env.RAG_API_URL || "http://localhost:3100";
+const RAG_API_KEY = process.env.RAG_API_KEY;
 const COLLECTION_PREFIX = `${PROJECT_NAME}_`;
 
 // API client
-const api = createApiClient(RAG_API_URL, PROJECT_NAME, PROJECT_PATH);
+const api = createApiClient(RAG_API_URL, PROJECT_NAME, PROJECT_PATH, RAG_API_KEY);
 
 // Mutable tool context shared by all handlers (session state updates in-place)
 const ctx: ToolContext = {

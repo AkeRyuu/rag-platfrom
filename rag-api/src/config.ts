@@ -46,6 +46,9 @@ export interface Config {
   // Sparse Vectors
   SPARSE_VECTORS_ENABLED: boolean;
 
+  // Authentication
+  API_KEY?: string;
+
   // Logging
   LOG_LEVEL: string;
 }
@@ -90,6 +93,9 @@ const config: Config = {
 
   // Sparse Vectors
   SPARSE_VECTORS_ENABLED: process.env.SPARSE_VECTORS_ENABLED === 'true',
+
+  // Authentication
+  API_KEY: process.env.API_KEY,
 
   // Logging
   LOG_LEVEL: process.env.LOG_LEVEL || 'info',
