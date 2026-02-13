@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "rag": {
+      "command": "npx",
+      "args": ["-y", "@crowley/rag-mcp"],
+      "env": {
+        "PROJECT_NAME": "your-project",
+        "PROJECT_PATH": "/path/to/your-project",
+        "RAG_API_URL": "http://localhost:3100",
+        "RAG_API_KEY": ""
+      }
+    }
+  }
+}

@@ -30,3 +30,6 @@ docker/data/
 # Cache
 .cache/
 *.cache
+
+# MCP config (contains API keys)
+.mcp.json
