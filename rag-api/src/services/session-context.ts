@@ -87,9 +87,10 @@ class SessionContextService {
 
     let context: SessionContext;
 
-    // Try to resume from previous session
-    if (resumeFrom) {
-      const previousContext = await this.getSession(projectName, resumeFrom);
+    // Try to resume from previous session (explicit or auto-detected)
+    const resumeId = resumeFrom || await this.findLastSessionId(projectName);
+    if (resumeId) {
+      const previousContext = await this.getSession(projectName, resumeId);
       if (previousContext) {
         context = {
           sessionId,
@@ -103,7 +104,7 @@ class SessionContextService {
           toolsUsed: [],
           pendingLearnings: [],
           decisions: previousContext.decisions,
-          metadata: { ...previousContext.metadata, ...metadata, resumedFrom: resumeFrom },
+          metadata: { ...previousContext.metadata, ...metadata, resumedFrom: resumeId },
         };
       } else {
         context = this.createNewContext(sessionId, projectName, metadata);
@@ -440,7 +441,7 @@ class SessionContextService {
   }
 
   /**
-   * Build a session briefing with project profile + recalled context.
+   * Build a session briefing with project profile + developer profile + recalled context.
    */
   private async buildSessionBriefing(context: SessionContext): Promise<string | null> {
     const parts: string[] = [];
@@ -453,6 +454,19 @@ class SessionContextService {
       }
     } catch {
       // Profile not available yet
+    }
+
+    // Add developer profile highlights
+    try {
+      const devProfile = await usagePatterns.buildDeveloperProfile(context.projectName);
+      if (devProfile.totalToolCalls > 0) {
+        const topFiles = devProfile.frequentFiles.slice(0, 5).map(f => f.file).join(', ');
+        const topTools = devProfile.preferredTools.slice(0, 3).map(t => t.tool).join(', ');
+        const peakHrs = devProfile.peakHours.slice(0, 2).map(h => `${h.hour}:00`).join(', ');
+        parts.push(`Developer: ${devProfile.totalSessions} sessions, top files: ${topFiles}, top tools: ${topTools}, peak hours: ${peakHrs}`);
+      }
+    } catch {
+      // Non-critical
     }
 
     // Auto-recall memories relevant to initial context
@@ -479,6 +493,40 @@ class SessionContextService {
     }
 
     return parts.length > 0 ? parts.join('\n') : null;
+  }
+
+  /**
+   * Find the most recent ended session within 24h for auto-continuity.
+   */
+  private async findLastSessionId(projectName: string): Promise<string | null> {
+    const collection = this.getCollectionName(projectName);
+    const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+
+    try {
+      const results = await vectorStore['client'].scroll(collection, {
+        limit: 5,
+        with_payload: true,
+        filter: {
+          must: [
+            { key: 'status', match: { value: 'ended' } },
+            { key: 'startedAt', range: { gte: cutoff } },
+          ],
+        },
+      });
+
+      if (results.points.length === 0) return null;
+
+      // Sort by startedAt desc and return the most recent
+      const sorted = results.points
+        .map(p => p.payload as unknown as SessionContext)
+        .sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime());
+
+      return sorted[0]?.sessionId || null;
+    } catch (error: any) {
+      if (error.status === 404) return null;
+      logger.debug('Failed to find last session', { error: error.message });
+      return null;
+    }
   }
 
   private createNewContext(

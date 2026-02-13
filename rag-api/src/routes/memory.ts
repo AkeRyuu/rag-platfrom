@@ -361,4 +361,15 @@ router.post('/memory/maintenance', validateProjectName, asyncHandler(async (req:
   res.json(result);
 }));
 
+/**
+ * Get developer profile (accumulated usage patterns)
+ * GET /api/developer-profile
+ */
+router.get('/developer-profile', validateProjectName, asyncHandler(async (req: Request, res: Response) => {
+  const { projectName } = req.body;
+  const { usagePatterns } = await import('../services/usage-patterns');
+  const profile = await usagePatterns.buildDeveloperProfile(projectName);
+  res.json(profile);
+}));
+
 export default router;

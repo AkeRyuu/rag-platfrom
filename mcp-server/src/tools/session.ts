@@ -61,6 +61,14 @@ export function createSessionTools(projectName: string, sharedCtx?: ToolContext)
       },
     },
     {
+      name: "get_developer_profile",
+      description: `Get accumulated developer profile for ${projectName}: frequent files, preferred tools, peak hours, common patterns.`,
+      inputSchema: {
+        type: "object" as const,
+        properties: {},
+      },
+    },
+    {
       name: "start_session",
       description: `Start a new working session for ${projectName}. Tracks tool usage, file changes, and learnings throughout the session.`,
       inputSchema: {
@@ -223,6 +231,51 @@ export function createSessionTools(projectName: string, sharedCtx?: ToolContext)
         result += data.keyActions
           .map((a: string, i: number) => `${i + 1}. ${a}`)
           .join("\n");
+        result += "\n";
+      }
+
+      return result;
+    },
+
+    get_developer_profile: async (
+      _args: Record<string, unknown>,
+      ctx: ToolContext
+    ): Promise<string> => {
+      const response = await ctx.api.get(
+        `/api/developer-profile`,
+        { headers: { "X-Project-Name": ctx.projectName } }
+      );
+      const p = response.data;
+
+      if (!p.totalToolCalls) {
+        return "No usage data yet. Use tools to build your developer profile.";
+      }
+
+      let result = `**Developer Profile** (${p.totalSessions} sessions, ${p.totalToolCalls} tool calls)\n\n`;
+
+      if (p.frequentFiles.length > 0) {
+        result += "**Frequent Files:**\n";
+        result += p.frequentFiles.slice(0, 10).map((f: any) => `- ${f.file} (${f.count}x)`).join("\n");
+        result += "\n\n";
+      }
+
+      if (p.preferredTools.length > 0) {
+        result += "**Preferred Tools:**\n";
+        result += p.preferredTools.slice(0, 8).map((t: any) =>
+          `- ${t.tool}: ${t.count}x (avg ${Math.round(t.avgDurationMs)}ms)`
+        ).join("\n");
+        result += "\n\n";
+      }
+
+      if (p.peakHours.length > 0) {
+        result += "**Peak Hours:** ";
+        result += p.peakHours.map((h: any) => `${h.hour}:00 (${h.count})`).join(", ");
+        result += "\n\n";
+      }
+
+      if (p.commonPatterns.length > 0) {
+        result += "**Common Patterns:**\n";
+        result += p.commonPatterns.slice(0, 5).map((q: string) => `- "${truncate(q, 60)}"`).join("\n");
         result += "\n";
       }
 

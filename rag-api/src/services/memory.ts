@@ -14,6 +14,14 @@ export type MemoryType = 'decision' | 'insight' | 'context' | 'todo' | 'conversa
 export type MemorySource = 'manual' | 'auto_conversation' | 'auto_pattern' | 'auto_feedback';
 export type TodoStatus = 'pending' | 'in_progress' | 'done' | 'cancelled';
 
+export type MemoryRelationType = 'supersedes' | 'relates_to' | 'contradicts' | 'extends';
+
+export interface MemoryRelation {
+  targetId: string;
+  type: MemoryRelationType;
+  reason?: string;
+}
+
 export interface Memory {
   id: string;
   type: MemoryType;
@@ -31,6 +39,9 @@ export interface Memory {
   confidence?: number; // 0-1 confidence score for auto-extracted memories
   validated?: boolean; // User validation status
   originalContext?: string; // Source conversation/context
+  // Relationships
+  relationships?: MemoryRelation[];
+  supersededBy?: string; // ID of memory that supersedes this one
 }
 
 export interface MemorySearchResult {
@@ -96,6 +107,20 @@ class MemoryService {
       `${type}: ${content}${relatedTo ? ` (related to: ${relatedTo})` : ''}${tags.length > 0 ? ` [tags: ${tags.join(', ')}]` : ''}`
     );
 
+    // Auto-detect relationships with existing memories
+    try {
+      const relationships = await this.detectRelationships(projectName, content, type, embedding);
+      if (relationships.length > 0) {
+        memory.relationships = relationships;
+        // Mark superseded memories
+        for (const rel of relationships.filter(r => r.type === 'supersedes')) {
+          await this.markSuperseded(collectionName, rel.targetId, memory.id);
+        }
+      }
+    } catch (err: any) {
+      logger.debug('Relationship detection failed', { error: err.message });
+    }
+
     const point: VectorPoint = {
       id: memory.id,
       vector: embedding,
@@ -107,7 +132,7 @@ class MemoryService {
 
     await vectorStore.upsert(collectionName, [point]);
 
-    logger.info(`Memory stored: ${type}`, { id: memory.id, project: projectName });
+    logger.info(`Memory stored: ${type}`, { id: memory.id, project: projectName, relationships: memory.relationships?.length || 0 });
     return memory;
   }
 
@@ -138,21 +163,25 @@ class MemoryService {
       filter
     );
 
-    return results.map(r => ({
-      memory: {
-        id: r.id,
-        type: r.payload.type as MemoryType,
-        content: r.payload.content as string,
-        tags: (r.payload.tags as string[]) || [],
-        relatedTo: r.payload.relatedTo as string | undefined,
-        createdAt: r.payload.createdAt as string,
-        updatedAt: r.payload.updatedAt as string,
-        metadata: r.payload.metadata as Record<string, unknown> | undefined,
-        status: r.payload.status as TodoStatus | undefined,
-        statusHistory: r.payload.statusHistory as Memory['statusHistory'],
-      },
-      score: r.score,
-    }));
+    return results
+      .filter(r => !r.payload.supersededBy) // Exclude superseded memories
+      .map(r => ({
+        memory: {
+          id: r.id,
+          type: r.payload.type as MemoryType,
+          content: r.payload.content as string,
+          tags: (r.payload.tags as string[]) || [],
+          relatedTo: r.payload.relatedTo as string | undefined,
+          createdAt: r.payload.createdAt as string,
+          updatedAt: r.payload.updatedAt as string,
+          metadata: r.payload.metadata as Record<string, unknown> | undefined,
+          status: r.payload.status as TodoStatus | undefined,
+          statusHistory: r.payload.statusHistory as Memory['statusHistory'],
+          relationships: r.payload.relationships as MemoryRelation[] | undefined,
+          supersededBy: r.payload.supersededBy as string | undefined,
+        },
+        score: r.score,
+      }));
   }
 
   /**
@@ -660,7 +689,82 @@ class MemoryService {
       source: point.payload.source as MemorySource | undefined,
       confidence: point.payload.confidence as number | undefined,
       validated: point.payload.validated as boolean | undefined,
+      relationships: point.payload.relationships as MemoryRelation[] | undefined,
+      supersededBy: point.payload.supersededBy as string | undefined,
     };
+  }
+
+  /**
+   * Auto-detect relationships: find similar memories and classify the relationship.
+   * Uses embedding similarity + content overlap to detect supersedes/contradicts.
+   */
+  private async detectRelationships(
+    projectName: string,
+    content: string,
+    type: MemoryType,
+    embedding: number[]
+  ): Promise<MemoryRelation[]> {
+    const collectionName = this.getCollectionName(projectName);
+    const relations: MemoryRelation[] = [];
+
+    // Find highly similar existing memories (score > 0.8)
+    const similar = await vectorStore.search(collectionName, embedding, 5, undefined, 0.75);
+    if (similar.length === 0) return relations;
+
+    const contentLower = content.toLowerCase();
+
+    for (const r of similar) {
+      const existingContent = (r.payload.content as string || '').toLowerCase();
+      const existingType = r.payload.type as string;
+
+      // Same type + very high similarity → likely supersedes
+      if (r.score > 0.85 && existingType === type) {
+        relations.push({
+          targetId: r.id,
+          type: 'supersedes',
+          reason: `High similarity (${(r.score * 100).toFixed(0)}%) with same type`,
+        });
+      }
+      // Contradiction signals: negation words
+      else if (
+        r.score > 0.8 &&
+        (contentLower.includes('not ') || contentLower.includes('instead') || contentLower.includes('wrong')) &&
+        existingType === type
+      ) {
+        relations.push({
+          targetId: r.id,
+          type: 'contradicts',
+          reason: `Similar topic with contradicting language`,
+        });
+      }
+      // Related: same type or shared tags, moderate similarity
+      else if (r.score > 0.75) {
+        relations.push({
+          targetId: r.id,
+          type: 'relates_to',
+          reason: `Semantically related (${(r.score * 100).toFixed(0)}%)`,
+        });
+      }
+    }
+
+    return relations.slice(0, 5); // Limit to 5 relationships
+  }
+
+  /**
+   * Mark an existing memory as superseded by a newer one.
+   */
+  private async markSuperseded(collectionName: string, targetId: string, newId: string): Promise<void> {
+    try {
+      await vectorStore['client'].setPayload(collectionName, {
+        points: [targetId],
+        payload: {
+          supersededBy: newId,
+          updatedAt: new Date().toISOString(),
+        },
+      });
+    } catch (err: any) {
+      logger.debug('Failed to mark memory as superseded', { targetId, error: err.message });
+    }
   }
 
   /**
