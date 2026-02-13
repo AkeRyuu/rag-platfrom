@@ -15,6 +15,7 @@ import config from '../config';
 import { indexingChunksByType } from '../utils/metrics';
 import { astParser } from './parsers/ast-parser';
 import { graphStore } from './graph-store';
+import { symbolIndex } from './symbol-index';
 import { buildAnchorString } from './anchor';
 
 export interface IndexOptions {
@@ -474,6 +475,22 @@ export async function indexProject(options: IndexOptions): Promise<IndexStats> {
             logger.debug(`Edge extraction failed for ${relativePath}`, { error: edgeError.message });
           }
 
+          // Index symbols for cross-file lookup
+          try {
+            const allSymbols = validChunks.flatMap(c => c.symbols || []);
+            if (allSymbols.length > 0) {
+              await symbolIndex.clearFileSymbols(projectName, relativePath);
+              await symbolIndex.indexFileSymbols(
+                projectName, relativePath, content,
+                [...new Set(allSymbols)],
+                validChunks[0]?.startLine || 1,
+                validChunks[validChunks.length - 1]?.endLine || 1
+              );
+            }
+          } catch (symError: any) {
+            logger.debug(`Symbol indexing failed for ${relativePath}`, { error: symError.message });
+          }
+
           stats.indexedFiles++;
         } catch (error) {
           logger.warn(`Failed to read file: ${filePath}`, { error });
@@ -860,6 +877,22 @@ export async function reindexWithZeroDowntime(options: ReindexOptions): Promise<
             }
           } catch (edgeError: any) {
             logger.debug(`Edge extraction failed for ${relativePath}`, { error: edgeError.message });
+          }
+
+          // Index symbols for cross-file lookup
+          try {
+            const allSymbols = validChunks.flatMap(c => c.symbols || []);
+            if (allSymbols.length > 0) {
+              await symbolIndex.clearFileSymbols(projectName, relativePath);
+              await symbolIndex.indexFileSymbols(
+                projectName, relativePath, content,
+                [...new Set(allSymbols)],
+                validChunks[0]?.startLine || 1,
+                validChunks[validChunks.length - 1]?.endLine || 1
+              );
+            }
+          } catch (symError: any) {
+            logger.debug(`Symbol indexing failed for ${relativePath}`, { error: symError.message });
           }
 
           stats.indexedFiles++;

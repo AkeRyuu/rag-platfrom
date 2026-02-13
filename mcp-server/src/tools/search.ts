@@ -165,6 +165,29 @@ export function createSearchTools(projectName: string): ToolModule {
       },
     },
     {
+      name: "find_symbol",
+      description: `Find a function, class, type, or interface by name in ${projectName}. Fast symbol lookup without full-text search.`,
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          symbol: {
+            type: "string",
+            description: "Symbol name to find (function, class, type, etc.)",
+          },
+          kind: {
+            type: "string",
+            description: "Filter by kind: function, class, interface, type, enum, const",
+          },
+          limit: {
+            type: "number",
+            description: "Max results (default: 10)",
+            default: 10,
+          },
+        },
+        required: ["symbol"],
+      },
+    },
+    {
       name: "search_graph",
       description: `Search ${projectName} codebase with graph expansion. Finds semantically similar code plus connected files via import/call relationships.`,
       inputSchema: {
@@ -332,6 +355,35 @@ export function createSearchTools(projectName: string): ToolModule {
             truncate(r.content, 500)
         )
         .join("\n\n---\n\n");
+    },
+
+    find_symbol: async (
+      args: Record<string, unknown>,
+      ctx: ToolContext
+    ): Promise<string> => {
+      const { symbol, kind, limit = 10 } = args as {
+        symbol: string;
+        kind?: string;
+        limit?: number;
+      };
+      const response = await ctx.api.post("/api/find-symbol", {
+        projectName: ctx.projectName,
+        symbol,
+        kind,
+        limit,
+      });
+      const results = response.data.results;
+      if (!results || results.length === 0) {
+        return `No symbol "${symbol}" found.`;
+      }
+      return results
+        .map(
+          (r: any) =>
+            `**${r.kind} ${r.name}** in \`${r.file}\` (lines ${r.startLine}-${r.endLine})\n` +
+            `\`${truncate(r.signature, 150)}\`` +
+            (r.exports ? " _(exported)_" : "")
+        )
+        .join("\n\n");
     },
 
     search_graph: async (

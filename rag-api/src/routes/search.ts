@@ -9,6 +9,7 @@ import { llm } from '../services/llm';
 import { contextPackBuilder } from '../services/context-pack';
 import { feedbackService } from '../services/feedback';
 import { queryLearning } from '../services/query-learning';
+import { symbolIndex } from '../services/symbol-index';
 import { asyncHandler } from '../middleware/async-handler';
 import { validate } from '../utils/validation';
 import {
@@ -70,6 +71,48 @@ function applyFeedbackBoost<T extends { payload: Record<string, unknown>; score:
 }
 
 /**
+ * Graph-boosted search: expand results by adding 1-hop neighbors from dependency graph.
+ * Fetches the best chunk for each neighbor file not already in results.
+ */
+async function expandWithGraph(
+  projectName: string,
+  collection: string,
+  results: SearchResult[],
+  queryEmbedding: number[],
+  maxExpand: number = 3
+): Promise<SearchResult[]> {
+  if (results.length === 0) return results;
+
+  const resultFiles = new Set(results.map(r => r.payload.file as string).filter(Boolean));
+
+  // Get 1-hop neighbors for all result files
+  const seedFiles = [...resultFiles].slice(0, 5); // limit seed files
+  const expanded = await graphStore.expand(projectName, seedFiles, 1);
+
+  // Find neighbor files not already in results
+  const newFiles = expanded.filter(f => !resultFiles.has(f)).slice(0, maxExpand * 2);
+  if (newFiles.length === 0) return results;
+
+  // Search for the best chunk in each neighbor file
+  const neighborResults: SearchResult[] = [];
+  for (const file of newFiles) {
+    const fileResults = await vectorStore.search(collection, queryEmbedding, 1, {
+      must: [{ key: 'file', match: { value: file } }],
+    });
+    if (fileResults.length > 0 && fileResults[0].score > 0.3) {
+      neighborResults.push({
+        ...fileResults[0],
+        payload: { ...fileResults[0].payload, graphExpanded: true },
+      });
+    }
+  }
+
+  // Sort neighbors by score and append the best ones
+  neighborResults.sort((a, b) => b.score - a.score);
+  return [...results, ...neighborResults.slice(0, maxExpand)];
+}
+
+/**
  * Search in a collection
  * POST /api/search
  */
@@ -92,7 +135,10 @@ router.post('/search', validate(searchSchema), asyncHandler(async (req: Request,
   let boosted = applyChunkTypeBoost(rawResults);
   boosted = applyFeedbackBoost(boosted, feedbackBoosts);
   boosted.sort((a, b) => b.score - a.score);
-  const results = deduplicateByFile(boosted).slice(0, limit);
+  const deduped = deduplicateByFile(boosted).slice(0, limit);
+
+  // Graph-boosted expansion: add related files from dependency graph
+  const results = await expandWithGraph(projectName, collection, deduped, queryEmbedding, 3);
 
   res.json({
     results: results.map(r => ({
@@ -102,6 +148,7 @@ router.post('/search', validate(searchSchema), asyncHandler(async (req: Request,
       score: r.score,
       startLine: r.payload.startLine,
       endLine: r.payload.endLine,
+      ...(r.payload.graphExpanded ? { graphExpanded: true } : {}),
     })),
     ...(rewritten ? { queryRewritten: { original: query, rewritten: effectiveQuery, reason } } : {}),
   });
@@ -180,7 +227,8 @@ router.post('/search-hybrid', validate(searchHybridSchema), asyncHandler(async (
     let boosted = applyChunkTypeBoost(rawResults);
     boosted = applyFeedbackBoost(boosted, feedbackBoosts);
     boosted.sort((a, b) => b.score - a.score);
-    const results = deduplicateByFile(boosted).slice(0, limit);
+    const deduped = deduplicateByFile(boosted).slice(0, limit);
+    const results = await expandWithGraph(projectName, collection, deduped, dense, 3);
 
     return res.json({
       results: results.map(r => ({
@@ -190,6 +238,7 @@ router.post('/search-hybrid', validate(searchHybridSchema), asyncHandler(async (
         score: r.score,
         semanticScore: r.score,
         keywordScore: r.score,
+        ...(r.payload.graphExpanded ? { graphExpanded: true } : {}),
       })),
       query: effectiveQuery,
       mode: 'native-sparse',
@@ -484,6 +533,36 @@ router.post('/context-pack', validate(contextPackSchema), asyncHandler(async (re
   });
 
   res.json(pack);
+}));
+
+/**
+ * Find symbols (functions, classes, types) by name
+ * POST /api/find-symbol
+ */
+router.post('/find-symbol', asyncHandler(async (req: Request, res: Response) => {
+  const { projectName, symbol, kind, limit = 10 } = req.body;
+
+  if (!projectName || !symbol) {
+    return res.status(400).json({ error: 'projectName and symbol are required' });
+  }
+
+  const results = await symbolIndex.findSymbol(projectName, symbol, kind, limit);
+  res.json({ results });
+}));
+
+/**
+ * Get exported symbols from a specific file
+ * POST /api/file-exports
+ */
+router.post('/file-exports', asyncHandler(async (req: Request, res: Response) => {
+  const { projectName, filePath } = req.body;
+
+  if (!projectName || !filePath) {
+    return res.status(400).json({ error: 'projectName and filePath are required' });
+  }
+
+  const exports = await symbolIndex.getFileExports(projectName, filePath);
+  res.json({ exports });
 }));
 
 export default router;
