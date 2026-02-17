@@ -351,31 +351,38 @@ export function createSessionTools(projectName: string, sharedCtx?: ToolContext)
         resumeFrom,
       });
       const data = response.data;
+      const session = data.session;
+
+      // Extract fields — API returns { session: { sessionId, startedAt, ... } }
+      const sid = session?.sessionId || data.sessionId;
+      const started = session?.startedAt || data.started;
+      const resumedFrom = session?.metadata?.resumedFrom || data.resumedFrom;
+      const initialFiles = session?.currentFiles || data.initialFiles;
 
       // Update shared context with active session ID
-      if (sharedCtx && data.sessionId) {
-        sharedCtx.activeSessionId = data.sessionId;
+      if (sharedCtx && sid) {
+        sharedCtx.activeSessionId = sid;
       }
 
       let result = `**Session Started**\n\n`;
-      result += `- **Session ID:** ${data.sessionId}\n`;
-      result += `- **Started:** ${data.started}\n`;
+      result += `- **Session ID:** ${sid}\n`;
+      result += `- **Started:** ${started}\n`;
 
-      if (data.resumedFrom) {
-        result += `- **Resumed From:** ${data.resumedFrom}\n`;
+      if (resumedFrom) {
+        result += `- **Resumed From:** ${resumedFrom}\n`;
       }
 
-      if (data.initialFiles && data.initialFiles.length > 0) {
+      if (initialFiles && initialFiles.length > 0) {
         result += `\n**Initial Files:**\n`;
-        result += data.initialFiles
+        result += initialFiles
           .map((f: string) => `- ${f}`)
           .join("\n");
         result += "\n";
       }
 
       // Include prefetch stats if available
-      if (data.session?.metadata?.prefetchStats) {
-        const pf = data.session.metadata.prefetchStats;
+      if (session?.metadata?.prefetchStats) {
+        const pf = session.metadata.prefetchStats;
         result += `\n**Predictive Prefetch:** ${pf.prefetchedCount ?? 0} resources prefetched\n`;
       }
 

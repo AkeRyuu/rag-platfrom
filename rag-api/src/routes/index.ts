@@ -39,6 +39,28 @@ import {
 const router = Router();
 
 // ============================================
+// Eager Collection Creation
+// ============================================
+
+/**
+ * Ensure critical collections exist for a project.
+ * Called fire-and-forget from MCP auto-session start.
+ * POST /api/ensure-collections
+ */
+router.post('/ensure-collections', validateProjectName, asyncHandler(async (req: Request, res: Response) => {
+  const { projectName } = req.body;
+  const collections = [
+    `${projectName}_sessions`,
+    `${projectName}_memory_pending`,
+    `${projectName}_agent_memory`,
+  ];
+
+  await Promise.all(collections.map(c => vectorStore.ensureCollection(c)));
+
+  res.json({ success: true, collections });
+}));
+
+// ============================================
 // Indexing Routes
 // ============================================
 
