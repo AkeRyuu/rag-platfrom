@@ -5,6 +5,7 @@
 import { Router, Request, Response } from 'express';
 import {
   indexProject,
+  indexFiles,
   getIndexStatus,
   getProjectStats,
   getCollectionName,
@@ -27,6 +28,7 @@ import { asyncHandler } from '../middleware/async-handler';
 import {
   validate,
   validateProjectName,
+  indexUploadSchema,
   indexConfluenceSchema,
   confluenceSearchSchema,
   searchFeedbackSchema,
@@ -98,6 +100,27 @@ router.post('/index', validateProjectName, asyncHandler(async (req: Request, res
     status: 'started',
     message: `Indexing started for ${projectName}`,
     collection: getCollectionName(projectName),
+  });
+}));
+
+/**
+ * Upload and index pre-read file contents (for remote MCP clients).
+ * Unlike POST /api/index which is fire-and-forget, this endpoint awaits
+ * processing so the client knows when to send the next batch.
+ * POST /api/index/upload
+ */
+router.post('/index/upload', validateProjectName, validate(indexUploadSchema), asyncHandler(async (req: Request, res: Response) => {
+  const { projectName, files, force, done } = req.body;
+
+  const stats = await indexFiles({ projectName, files, force, done });
+
+  res.json({
+    status: 'ok',
+    filesProcessed: stats.indexedFiles,
+    chunksCreated: stats.totalChunks,
+    errors: stats.errors,
+    duration: stats.duration,
+    done,
   });
 }));
 

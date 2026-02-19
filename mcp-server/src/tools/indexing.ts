@@ -1,9 +1,127 @@
 /**
  * Indexing tools module - codebase indexing, status, zero-downtime reindex,
  * and alias management.
+ *
+ * index_codebase and reindex_zero_downtime read files locally and upload
+ * them to the RAG API in batches via POST /api/index/upload. This allows
+ * remote MCP clients to index codebases that aren't on the server filesystem.
  */
 
+import * as fs from "fs";
+import * as path from "path";
+import { glob } from "glob";
 import type { ToolModule, ToolHandler, ToolContext } from "../types.js";
+
+const DEFAULT_PATTERNS = [
+  "**/*.ts",
+  "**/*.tsx",
+  "**/*.js",
+  "**/*.jsx",
+  "**/*.vue",
+  "**/*.py",
+  "**/*.go",
+  "**/*.rs",
+  "**/*.java",
+  "**/*.md",
+  "**/*.sql",
+  "**/*.yml",
+  "**/*.yaml",
+  "**/Dockerfile",
+];
+
+const DEFAULT_EXCLUDE = [
+  "**/node_modules/**",
+  "**/dist/**",
+  "**/build/**",
+  "**/.git/**",
+  "**/coverage/**",
+  "**/.nuxt/**",
+  "**/.next/**",
+  "**/vendor/**",
+  "**/__pycache__/**",
+  "**/target/**",
+  "**/package-lock.json",
+  "**/yarn.lock",
+  "**/pnpm-lock.yaml",
+  "**/eval/results/**",
+  "**/eval/golden-queries.json",
+];
+
+const BATCH_SIZE = 50;
+
+/**
+ * Discover files locally using glob, read their contents, and upload
+ * them to the RAG API in batches.
+ */
+async function uploadFiles(
+  ctx: ToolContext,
+  projectPath: string,
+  opts: {
+    patterns?: string[];
+    excludePatterns?: string[];
+    force?: boolean;
+  }
+): Promise<{ totalFiles: number; indexedFiles: number; totalChunks: number; errors: number; duration: number }> {
+  const patterns = opts.patterns || DEFAULT_PATTERNS;
+  const excludePatterns = opts.excludePatterns || DEFAULT_EXCLUDE;
+
+  // Discover files locally
+  const files = await glob(patterns, {
+    cwd: projectPath,
+    ignore: excludePatterns,
+    nodir: true,
+    absolute: false,
+  });
+
+  if (files.length === 0) {
+    return { totalFiles: 0, indexedFiles: 0, totalChunks: 0, errors: 0, duration: 0 };
+  }
+
+  let totalIndexed = 0;
+  let totalChunks = 0;
+  let totalErrors = 0;
+  let totalDuration = 0;
+
+  for (let i = 0; i < files.length; i += BATCH_SIZE) {
+    const batch = files.slice(i, i + BATCH_SIZE);
+    const filePayloads: Array<{ path: string; content: string }> = [];
+
+    for (const relPath of batch) {
+      try {
+        const absPath = path.join(projectPath, relPath);
+        const content = fs.readFileSync(absPath, "utf-8");
+        filePayloads.push({ path: relPath, content });
+      } catch {
+        totalErrors++;
+      }
+    }
+
+    if (filePayloads.length === 0) continue;
+
+    const isFirst = i === 0;
+    const isLast = i + BATCH_SIZE >= files.length;
+
+    const response = await ctx.api.post("/api/index/upload", {
+      files: filePayloads,
+      force: isFirst && (opts.force ?? false),
+      done: isLast,
+    });
+
+    const data = response.data;
+    totalIndexed += data.filesProcessed || 0;
+    totalChunks += data.chunksCreated || 0;
+    totalErrors += data.errors || 0;
+    totalDuration += data.duration || 0;
+  }
+
+  return {
+    totalFiles: files.length,
+    indexedFiles: totalIndexed,
+    totalChunks,
+    errors: totalErrors,
+    duration: totalDuration,
+  };
+}
 
 /**
  * Create the indexing tools module with project-specific descriptions.
@@ -74,20 +192,20 @@ export function createIndexingTools(projectName: string): ToolModule {
       args: Record<string, unknown>,
       ctx: ToolContext
     ): Promise<string> => {
-      const { path, force = false } = args as {
+      const { path: indexPath, force = false } = args as {
         path?: string;
         force?: boolean;
       };
-      const response = await ctx.api.post("/api/index", {
-        collection: `${ctx.collectionPrefix}codebase`,
-        path: path || ctx.projectPath,
-        force,
-      });
-      const data = response.data;
+      const projectPath = indexPath || ctx.projectPath;
+
+      const stats = await uploadFiles(ctx, projectPath, { force });
 
       let result = `## Indexing ${projectName}\n\n`;
-      result += `- **Status:** ${data.status || "started"}\n`;
-      result += `- **Files to process:** ${data.filesToProcess ?? "N/A"}\n`;
+      result += `- **Total files found:** ${stats.totalFiles}\n`;
+      result += `- **Files indexed:** ${stats.indexedFiles}\n`;
+      result += `- **Chunks created:** ${stats.totalChunks}\n`;
+      result += `- **Errors:** ${stats.errors}\n`;
+      result += `- **Duration:** ${stats.duration}ms\n`;
 
       return result;
     },
@@ -115,23 +233,25 @@ export function createIndexingTools(projectName: string): ToolModule {
       args: Record<string, unknown>,
       ctx: ToolContext
     ): Promise<string> => {
-      const { path, patterns, excludePatterns } = args as {
+      const { path: indexPath, patterns, excludePatterns } = args as {
         path?: string;
         patterns?: string[];
         excludePatterns?: string[];
       };
-      const response = await ctx.api.post("/api/reindex", {
-        collection: `${ctx.collectionPrefix}codebase`,
-        path: path || ctx.projectPath,
+      const projectPath = indexPath || ctx.projectPath;
+
+      const stats = await uploadFiles(ctx, projectPath, {
         patterns,
         excludePatterns,
+        force: true,
       });
-      const data = response.data;
 
-      let result = `## Zero-Downtime Reindex: ${projectName}\n\n`;
-      result += `- **Alias:** ${data.alias || "N/A"}\n`;
-      result += `- **Status:** ${data.status || "started"}\n`;
-      result += `- **Message:** ${data.message || "Reindex initiated"}\n`;
+      let result = `## Reindex: ${projectName}\n\n`;
+      result += `- **Total files found:** ${stats.totalFiles}\n`;
+      result += `- **Files indexed:** ${stats.indexedFiles}\n`;
+      result += `- **Chunks created:** ${stats.totalChunks}\n`;
+      result += `- **Errors:** ${stats.errors}\n`;
+      result += `- **Duration:** ${stats.duration}ms\n`;
 
       return result;
     },

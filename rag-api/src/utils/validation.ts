@@ -70,6 +70,16 @@ export const indexSchema = z.object({
   excludePatterns: z.array(z.string()).optional(),
 });
 
+export const indexUploadSchema = z.object({
+  projectName: projectNameSchema.optional(),
+  files: z.array(z.object({
+    path: z.string().min(1),
+    content: z.string(),
+  })).min(1).max(100),
+  force: z.boolean().default(false),
+  done: z.boolean().default(false),
+});
+
 export const indexConfluenceSchema = z.object({
   projectName: projectNameSchema.optional(),
   spaceKeys: z.array(z.string()).optional(),
@@ -413,6 +423,7 @@ export type AskInput = z.infer<typeof askSchema>;
 export type ExplainInput = z.infer<typeof explainSchema>;
 export type FindFeatureInput = z.infer<typeof findFeatureSchema>;
 export type IndexInput = z.infer<typeof indexSchema>;
+export type IndexUploadInput = z.infer<typeof indexUploadSchema>;
 export type IndexConfluenceInput = z.infer<typeof indexConfluenceSchema>;
 export type CreateMemoryInput = z.infer<typeof createMemorySchema>;
 export type RecallMemoryInput = z.infer<typeof recallMemorySchema>;
