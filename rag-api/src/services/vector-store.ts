@@ -92,6 +92,39 @@ class VectorStoreService {
   }
 
   /**
+   * Check if a name is used by an alias (not a real collection)
+   */
+  private async isAlias(name: string): Promise<{ isAlias: boolean; collection?: string }> {
+    try {
+      const aliases = await this.listAliases();
+      const found = aliases.find(a => a.alias === name);
+      return found ? { isAlias: true, collection: found.collection } : { isAlias: false };
+    } catch {
+      return { isAlias: false };
+    }
+  }
+
+  /**
+   * Resolve an orphaned alias left by a failed zero-downtime reindex.
+   * Deletes the alias and its backing temp collection, so a real collection can be created.
+   */
+  async resolveOrphanedAlias(name: string): Promise<boolean> {
+    const { isAlias, collection } = await this.isAlias(name);
+    if (!isAlias) return false;
+
+    logger.warn(`Resolving orphaned alias: ${name} -> ${collection}`);
+    await this.deleteAlias(name);
+    if (collection) {
+      try {
+        await this.deleteCollection(collection);
+      } catch {
+        // temp collection may already be gone
+      }
+    }
+    return true;
+  }
+
+  /**
    * Ensure a collection exists, create if not
    */
   async ensureCollection(name: string): Promise<void> {
@@ -100,6 +133,9 @@ class VectorStoreService {
       const exists = collections.collections.some(c => c.name === name);
 
       if (!exists) {
+        // An alias with this name blocks collection creation — clean it up
+        await this.resolveOrphanedAlias(name);
+
         await this.client.createCollection(name, {
           vectors: {
             size: config.VECTOR_SIZE,
@@ -270,6 +306,9 @@ class VectorStoreService {
       const exists = collections.collections.some(c => c.name === name);
 
       if (!exists) {
+        // An alias with this name blocks collection creation — clean it up
+        await this.resolveOrphanedAlias(name);
+
         await this.client.createCollection(name, {
           vectors: {
             dense: {

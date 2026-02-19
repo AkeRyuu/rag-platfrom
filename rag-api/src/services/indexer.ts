@@ -1361,16 +1361,28 @@ export async function reindexWithZeroDowntime(options: ReindexOptions): Promise<
     progress.status = 'error';
     progress.error = error.message;
 
-    // Cleanup: delete new collection if alias wasn't swapped
-    if (!stats.aliasSwapped) {
+    // Cleanup on failure
+    logger.error(`Zero-downtime reindex failed for ${projectName}`, { error: error.message });
+
+    try {
+      // Delete the new temp collection we created
+      await vectorStore.deleteCollection(newCollectionName);
+      logger.info(`Cleaned up temp collection: ${newCollectionName}`);
+    } catch {
+      // Ignore — collection may not have been created yet
+    }
+
+    if (!stats.aliasSwapped && !stats.previousCollection) {
+      // No prior alias existed and we didn't swap — alias may have been created
+      // by createAlias before the error. Clean it up so future indexing isn't blocked.
       try {
-        await vectorStore.deleteCollection(newCollectionName);
+        await vectorStore.deleteAlias(alias);
+        logger.info(`Cleaned up orphaned alias: ${alias}`);
       } catch {
-        // Ignore cleanup errors
+        // Alias may not exist — ignore
       }
     }
 
-    logger.error(`Zero-downtime reindex failed for ${projectName}`, { error: error.message });
     throw error;
   }
 }
