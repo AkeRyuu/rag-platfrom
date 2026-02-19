@@ -85,6 +85,9 @@ class SessionContextService {
       metadata,
     } = options;
 
+    // Cleanup stale active sessions before looking for resumable ones
+    await this.cleanupStaleSessions(projectName);
+
     let context: SessionContext;
 
     // Try to resume from previous session (explicit or auto-detected)
@@ -526,6 +529,44 @@ class SessionContextService {
   }
 
   /**
+   * End stale active sessions (no activity for 2+ hours).
+   */
+  private async cleanupStaleSessions(projectName: string): Promise<void> {
+    const collection = this.getCollectionName(projectName);
+    const staleCutoff = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+
+    try {
+      const results = await vectorStore['client'].scroll(collection, {
+        limit: 20,
+        with_payload: true,
+        filter: {
+          must: [
+            { key: 'status', match: { value: 'active' } },
+            { key: 'lastActivityAt', range: { lte: staleCutoff } },
+          ],
+        },
+      });
+
+      for (const point of results.points) {
+        const session = point.payload as unknown as SessionContext;
+        await this.updateSession(projectName, session.sessionId, {
+          status: 'ended',
+          metadata: {
+            ...session.metadata,
+            endedAt: new Date().toISOString(),
+            endReason: 'stale_cleanup',
+          },
+        });
+        logger.info(`Cleaned up stale session: ${session.sessionId}`, { projectName });
+      }
+    } catch (error: any) {
+      if (error.status !== 404) {
+        logger.debug('Failed to cleanup stale sessions', { error: error.message });
+      }
+    }
+  }
+
+  /**
    * Find the most recent ended session within 24h for auto-continuity.
    */
   private async findLastSessionId(projectName: string): Promise<string | null> {
@@ -537,8 +578,11 @@ class SessionContextService {
         limit: 5,
         with_payload: true,
         filter: {
-          must: [
+          should: [
             { key: 'status', match: { value: 'ended' } },
+            { key: 'status', match: { value: 'active' } },
+          ],
+          must: [
             { key: 'startedAt', range: { gte: cutoff } },
           ],
         },

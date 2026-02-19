@@ -345,6 +345,7 @@ ${alternatives ? `## Alternatives Considered\n${alternatives}` : ""}`;
       query: query || "architecture decision ADR",
       type: "decision",
       limit,
+      tag: "adr",
     });
 
     const results = response.data.results || [];
@@ -448,6 +449,7 @@ ${appliesTo ? `## Applies To\n${appliesTo}` : ""}`;
       query: query || "architectural pattern structure",
       type: "context",
       limit,
+      tag: "pattern",
     });
 
     const results = response.data.results || [];
@@ -497,6 +499,7 @@ ${appliesTo ? `## Applies To\n${appliesTo}` : ""}`;
       query: patternQuery,
       type: "context",
       limit: 5,
+      tag: "pattern",
     });
 
     // Get relevant ADRs
@@ -505,6 +508,7 @@ ${appliesTo ? `## Applies To\n${appliesTo}` : ""}`;
       query: patternQuery,
       type: "decision",
       limit: 5,
+      tag: "adr",
     });
 
     // Search similar code in codebase
@@ -643,6 +647,7 @@ Provide a structured analysis:
       query: `${type} ${feature} pattern structure`,
       type: "context",
       limit: 5,
+      tag: "pattern",
     });
 
     // Get relevant ADRs
@@ -651,6 +656,7 @@ Provide a structured analysis:
       query: `${type} ${feature}`,
       type: "decision",
       limit: 3,
+      tag: "adr",
     });
 
     // Get similar implementations
@@ -784,6 +790,7 @@ ${relatedAdr ? `## Related ADR\n${relatedAdr}` : ""}`;
       query: "technical debt violation issue",
       type: "insight",
       limit: limit * 2, // Fetch extra to account for filtering
+      tag: "tech-debt",
     });
 
     const results = response.data.results || [];
@@ -849,6 +856,7 @@ ${relatedAdr ? `## Related ADR\n${relatedAdr}` : ""}`;
       query: "pattern structure organization",
       type: "context",
       limit: 10,
+      tag: "pattern",
     });
 
     // Get codebase structure

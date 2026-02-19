@@ -123,6 +123,10 @@ async function uploadFiles(
   };
 }
 
+// In-memory cache for get_index_status (30 min TTL)
+let _statusCache: { data: string; expiresAt: number } | null = null;
+const STATUS_CACHE_TTL = 30 * 60 * 1000; // 30 minutes
+
 /**
  * Create the indexing tools module with project-specific descriptions.
  */
@@ -148,7 +152,7 @@ export function createIndexingTools(projectName: string): ToolModule {
     },
     {
       name: "get_index_status",
-      description: `Get the indexing status for ${projectName} codebase.`,
+      description: `Get the indexing status for ${projectName} codebase. Results cached for 30 minutes.`,
       inputSchema: {
         type: "object" as const,
         properties: {},
@@ -199,6 +203,7 @@ export function createIndexingTools(projectName: string): ToolModule {
       const projectPath = indexPath || ctx.projectPath;
 
       const stats = await uploadFiles(ctx, projectPath, { force });
+      _statusCache = null; // Invalidate status cache after indexing
 
       let result = `## Indexing ${projectName}\n\n`;
       result += `- **Total files found:** ${stats.totalFiles}\n`;
@@ -214,6 +219,12 @@ export function createIndexingTools(projectName: string): ToolModule {
       _args: Record<string, unknown>,
       ctx: ToolContext
     ): Promise<string> => {
+      // Return cached result if still valid
+      if (_statusCache && Date.now() < _statusCache.expiresAt) {
+        const remainingMin = Math.round((_statusCache.expiresAt - Date.now()) / 60000);
+        return _statusCache.data + `\n_Cached (expires in ${remainingMin}min)_`;
+      }
+
       const response = await ctx.api.get(
         `/api/index/status/${ctx.collectionPrefix}codebase`
       );
@@ -225,6 +236,9 @@ export function createIndexingTools(projectName: string): ToolModule {
       result += `- **Indexed Files:** ${data.indexedFiles ?? "N/A"}\n`;
       result += `- **Last Updated:** ${data.lastUpdated ? new Date(data.lastUpdated).toLocaleString() : "Never"}\n`;
       result += `- **Vector Count:** ${data.vectorCount ?? "N/A"}\n`;
+
+      // Cache for 30 minutes
+      _statusCache = { data: result, expiresAt: Date.now() + STATUS_CACHE_TTL };
 
       return result;
     },
@@ -245,6 +259,7 @@ export function createIndexingTools(projectName: string): ToolModule {
         excludePatterns,
         force: true,
       });
+      _statusCache = null; // Invalidate status cache after reindex
 
       let result = `## Reindex: ${projectName}\n\n`;
       result += `- **Total files found:** ${stats.totalFiles}\n`;

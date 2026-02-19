@@ -3,6 +3,8 @@
  * implementation suggestions, test suggestions, and code context.
  */
 
+import * as fs from "fs";
+import * as path from "path";
 import type { ToolModule, ToolHandler, ToolContext } from "../types.js";
 import { truncate, pct, PREVIEW } from "../formatters.js";
 
@@ -11,6 +13,25 @@ import { truncate, pct, PREVIEW } from "../formatters.js";
  */
 export function createSuggestionTools(projectName: string): ToolModule {
   const tools = [
+    {
+      name: "context_briefing",
+      description: `REQUIRED before code changes. Parallel lookup of recall + search + patterns + ADRs + graph for ${projectName}. One call replaces 5 separate RAG lookups.`,
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          task: {
+            type: "string",
+            description: "What you will implement/change",
+          },
+          files: {
+            type: "array",
+            items: { type: "string" },
+            description: "Files you plan to modify",
+          },
+        },
+        required: ["task"],
+      },
+    },
     {
       name: "get_contextual_suggestions",
       description: `Get contextual suggestions based on current work context for ${projectName}. Returns relevant suggestions, triggers, and related memories.`,
@@ -119,9 +140,175 @@ export function createSuggestionTools(projectName: string): ToolModule {
         },
       },
     },
+    {
+      name: "setup_project",
+      description:
+        "Configure Claude Code for RAG integration. Creates/updates .mcp.json, adds RAG instructions to CLAUDE.md, and configures permissions. Call after index_codebase on a new project.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          projectPath: {
+            type: "string",
+            description: "Absolute path to project root",
+          },
+          projectName: {
+            type: "string",
+            description: "Project name in Qdrant (collection prefix)",
+          },
+          ragApiUrl: {
+            type: "string",
+            description: "RAG API URL (default: from MCP env)",
+          },
+          ragApiKey: {
+            type: "string",
+            description: "RAG API key (default: from MCP env)",
+          },
+          updateClaudeMd: {
+            type: "boolean",
+            description: "Add RAG section to CLAUDE.md (default: true)",
+          },
+        },
+        required: ["projectPath", "projectName"],
+      },
+    },
   ];
 
   const handlers: Record<string, ToolHandler> = {
+    context_briefing: async (
+      args: Record<string, unknown>,
+      ctx: ToolContext
+    ): Promise<string> => {
+      const { task, files } = args as {
+        task: string;
+        files?: string[];
+      };
+
+      // 5 parallel lookups
+      const [memoriesRes, searchRes, patternsRes, adrsRes, graphRes] =
+        await Promise.all([
+          // 1. Recall relevant memories
+          ctx.api
+            .post("/api/memory/recall", {
+              projectName: ctx.projectName,
+              query: task,
+              limit: 5,
+              type: "all",
+            })
+            .catch(() => null),
+          // 2. Hybrid search for related code
+          ctx.api
+            .post("/api/search-hybrid", {
+              projectName: ctx.projectName,
+              query: task,
+              limit: 5,
+              mode: "navigate",
+            })
+            .catch(() => null),
+          // 3. Architectural patterns
+          ctx.api
+            .post("/api/memory/recall", {
+              projectName: ctx.projectName,
+              query: task,
+              type: "context",
+              limit: 5,
+              tag: "pattern",
+            })
+            .catch(() => null),
+          // 4. ADRs
+          ctx.api
+            .post("/api/memory/recall", {
+              projectName: ctx.projectName,
+              query: task,
+              type: "decision",
+              limit: 3,
+              tag: "adr",
+            })
+            .catch(() => null),
+          // 5. Graph dependencies (if files specified)
+          files && files.length > 0
+            ? ctx.api
+                .post("/api/search-graph", {
+                  projectName: ctx.projectName,
+                  query: files[0],
+                  expandHops: 1,
+                  limit: 5,
+                })
+                .catch(() => null)
+            : Promise.resolve(null),
+        ]);
+
+      let result = `# Context Briefing: ${task}\n\n`;
+
+      // Memories
+      const memories = memoriesRes?.data?.results || memoriesRes?.data?.memories || [];
+      if (memories.length > 0) {
+        result += `## Memories (${memories.length})\n`;
+        for (const m of memories) {
+          const mem = m.memory || m;
+          result += `- [${mem.type || "note"}] ${truncate(mem.content || "", 150)}\n`;
+        }
+        result += "\n";
+      }
+
+      // Related code
+      const codeResults = searchRes?.data?.results || [];
+      if (codeResults.length > 0) {
+        result += `## Related Code (${codeResults.length})\n`;
+        for (const r of codeResults) {
+          result += `- \`${r.file}\``;
+          if (r.symbols?.length) result += ` — ${r.symbols.join(", ")}`;
+          result += "\n";
+        }
+        result += "\n";
+      }
+
+      // Patterns
+      const patterns = (patternsRes?.data?.results || []).filter(
+        (r: any) => r.memory?.tags?.includes("pattern")
+      );
+      if (patterns.length > 0) {
+        result += `## Patterns (${patterns.length})\n`;
+        for (const p of patterns) {
+          const name = p.memory?.metadata?.patternName || p.memory?.relatedTo || "Pattern";
+          result += `- **${name}**: ${truncate(p.memory?.content || "", 120)}\n`;
+        }
+        result += "\n";
+      }
+
+      // ADRs
+      const adrs = (adrsRes?.data?.results || []).filter(
+        (r: any) => r.memory?.tags?.includes("adr")
+      );
+      if (adrs.length > 0) {
+        result += `## ADRs (${adrs.length})\n`;
+        for (const a of adrs) {
+          const title = a.memory?.metadata?.adrTitle || a.memory?.relatedTo || "ADR";
+          result += `- **${title}**: ${truncate(a.memory?.content || "", 120)}\n`;
+        }
+        result += "\n";
+      }
+
+      // Graph dependencies
+      const graphResults = graphRes?.data?.results || graphRes?.data?.directResults || [];
+      const connectedFiles = graphRes?.data?.connectedFiles || graphRes?.data?.expandedResults || [];
+      if (graphResults.length > 0 || connectedFiles.length > 0) {
+        result += `## Dependencies\n`;
+        for (const g of graphResults) {
+          result += `- \`${g.file}\`\n`;
+        }
+        for (const c of connectedFiles) {
+          result += `- \`${c.file}\` (connected)\n`;
+        }
+        result += "\n";
+      }
+
+      if (result.endsWith(`# Context Briefing: ${task}\n\n`)) {
+        result += "_No relevant context found. Proceed with implementation._\n";
+      }
+
+      return result;
+    },
+
     get_contextual_suggestions: async (
       args: Record<string, unknown>,
       ctx: ToolContext
@@ -344,6 +531,136 @@ export function createSuggestionTools(projectName: string): ToolModule {
           result += "\n";
         }
       }
+
+      return result;
+    },
+
+    setup_project: async (
+      args: Record<string, unknown>,
+      ctx: ToolContext
+    ): Promise<string> => {
+      const {
+        projectPath,
+        projectName: targetProject,
+        ragApiUrl,
+        ragApiKey,
+        updateClaudeMd = true,
+      } = args as {
+        projectPath: string;
+        projectName: string;
+        ragApiUrl?: string;
+        ragApiKey?: string;
+        updateClaudeMd?: boolean;
+      };
+
+      const apiUrl = ragApiUrl || process.env.RAG_API_URL || "http://localhost:3100";
+      const apiKey = ragApiKey || process.env.RAG_API_KEY;
+      const serverName = `${targetProject}-rag`;
+      const changes: string[] = [];
+
+      // 1. Create/update .mcp.json
+      const mcpJsonPath = path.join(projectPath, ".mcp.json");
+      let mcpConfig: any = {};
+      try {
+        const existing = fs.readFileSync(mcpJsonPath, "utf-8");
+        mcpConfig = JSON.parse(existing);
+      } catch {
+        // File doesn't exist or invalid JSON
+      }
+
+      if (!mcpConfig.mcpServers) mcpConfig.mcpServers = {};
+
+      const serverEnv: Record<string, string> = {
+        RAG_API_URL: apiUrl,
+        PROJECT_NAME: targetProject,
+        PROJECT_PATH: projectPath,
+      };
+      if (apiKey) serverEnv.RAG_API_KEY = apiKey;
+
+      mcpConfig.mcpServers[serverName] = {
+        command: "npx",
+        args: ["-y", "@crowley/rag-mcp@latest"],
+        env: serverEnv,
+      };
+
+      fs.writeFileSync(mcpJsonPath, JSON.stringify(mcpConfig, null, 2) + "\n");
+      changes.push(`.mcp.json — added \`${serverName}\` server`);
+
+      // 2. Update CLAUDE.md with RAG section
+      if (updateClaudeMd) {
+        const claudeMdPath = path.join(projectPath, "CLAUDE.md");
+        let claudeMd = "";
+        try {
+          claudeMd = fs.readFileSync(claudeMdPath, "utf-8");
+        } catch {
+          // File doesn't exist
+        }
+
+        const ragSection = `\n## RAG Integration
+
+You MUST call \`context_briefing\` before making any code changes.
+This single tool performs all RAG lookups in parallel (recall, search, patterns, ADRs, graph).
+
+Example: \`context_briefing(task: "describe your change", files: ["path/to/file.ts"])\`
+
+After completing significant changes:
+- \`remember\` — save important context for future sessions
+- \`record_adr\` — document architectural decisions
+`;
+
+        if (claudeMd.includes("## RAG")) {
+          changes.push("CLAUDE.md — RAG section already exists, skipped");
+        } else {
+          claudeMd = claudeMd ? claudeMd.trimEnd() + "\n" + ragSection : `# CLAUDE.md\n${ragSection}`;
+          fs.writeFileSync(claudeMdPath, claudeMd);
+          changes.push("CLAUDE.md — added RAG Integration section");
+        }
+      }
+
+      // 3. Create/update .claude/settings.local.json permissions
+      const claudeDir = path.join(projectPath, ".claude");
+      const settingsPath = path.join(claudeDir, "settings.local.json");
+      let settings: any = {};
+      try {
+        const existing = fs.readFileSync(settingsPath, "utf-8");
+        settings = JSON.parse(existing);
+      } catch {
+        // File doesn't exist or invalid JSON
+      }
+
+      if (!settings.permissions) settings.permissions = {};
+      if (!settings.permissions.allow) settings.permissions.allow = [];
+
+      const mcpPermission = `mcp__${serverName}__*`;
+      if (!settings.permissions.allow.includes(mcpPermission)) {
+        settings.permissions.allow.push(mcpPermission);
+        if (!fs.existsSync(claudeDir)) fs.mkdirSync(claudeDir, { recursive: true });
+        fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n");
+        changes.push(`.claude/settings.local.json — added \`${mcpPermission}\` permission`);
+      } else {
+        changes.push(".claude/settings.local.json — permission already exists, skipped");
+      }
+
+      // 4. Check index status
+      let indexInfo = "";
+      try {
+        const statusRes = await ctx.api.get(`/api/index/status/${targetProject}_codebase`);
+        const data = statusRes.data;
+        indexInfo = `\n## Index Status\n- **Vectors:** ${data.vectorCount ?? "N/A"}\n- **Status:** ${data.status || "unknown"}\n`;
+      } catch {
+        indexInfo = "\n## Index Status\n_Not indexed yet. Run `index_codebase` first._\n";
+      }
+
+      let result = `# Project Setup: ${targetProject}\n\n`;
+      result += `## Files Updated\n`;
+      for (const c of changes) {
+        result += `- ${c}\n`;
+      }
+      result += indexInfo;
+      result += `\n## Next Steps\n`;
+      result += `1. Restart Claude Code to load the new MCP server\n`;
+      result += `2. Run \`index_codebase\` if not indexed yet\n`;
+      result += `3. Use \`context_briefing\` before code changes\n`;
 
       return result;
     },

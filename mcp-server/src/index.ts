@@ -119,6 +119,24 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   };
 });
 
+// Graceful shutdown: close active session on exit
+async function cleanup() {
+  if (ctx.activeSessionId) {
+    try {
+      await api.post(`/api/session/${ctx.activeSessionId}/end`, {
+        projectName: PROJECT_NAME,
+        summary: "Session ended by MCP server shutdown",
+        autoSaveLearnings: true,
+      });
+    } catch {
+      // Best-effort, don't block shutdown
+    }
+  }
+  process.exit(0);
+}
+process.on("SIGINT", cleanup);
+process.on("SIGTERM", cleanup);
+
 // Start server
 async function main() {
   const transport = new StdioServerTransport();

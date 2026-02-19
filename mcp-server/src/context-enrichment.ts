@@ -35,6 +35,7 @@ export const DEFAULT_ENRICHABLE_TOOLS = new Set([
   "suggest_implementation",
   "suggest_related_code",
   "check_architecture",
+  "context_briefing",
   "run_agent",
 ]);
 
@@ -103,26 +104,44 @@ export class ContextEnricher {
   }
 
   /**
-   * After hook: fire-and-forget session activity tracking.
+   * After hook: fire-and-forget session activity tracking + implicit feedback.
    */
   after(
     name: string,
-    _args: Record<string, unknown>,
-    _result: string,
+    args: Record<string, unknown>,
+    result: string,
     ctx: ToolContext
   ): void {
-    if (!ctx.activeSessionId) return;
+    // Session activity tracking
+    if (ctx.activeSessionId) {
+      ctx.api
+        .post(`/api/session/${ctx.activeSessionId}/activity`, {
+          projectName: ctx.projectName,
+          type: "tool",
+          value: name,
+        })
+        .catch(() => {});
+    }
 
-    // Fire-and-forget: track tool usage in session
-    ctx.api
-      .post(`/api/session/${ctx.activeSessionId}/activity`, {
-        projectName: ctx.projectName,
-        type: "tool",
-        value: name,
-      })
-      .catch(() => {
-        // Silently ignore tracking errors
-      });
+    // Implicit positive feedback for enrichable search tools
+    if (this.config.enrichableTools.has(name)) {
+      const query = this.extractQuery(args);
+      if (
+        query &&
+        result &&
+        !result.includes("No results") &&
+        !result.includes("not found") &&
+        !result.includes("No relevant context found")
+      ) {
+        ctx.api
+          .post("/api/feedback/search", {
+            projectName: ctx.projectName,
+            query,
+            feedbackType: "helpful",
+          })
+          .catch(() => {});
+      }
+    }
   }
 
   /**
