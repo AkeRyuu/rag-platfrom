@@ -113,11 +113,45 @@ async function expandWithGraph(
 }
 
 /**
+ * Convert a search result to a compact navigation pointer (no content).
+ */
+function toNavigateResult(r: SearchResult, connections?: string[]) {
+  return {
+    file: r.payload.file,
+    lines: [r.payload.startLine, r.payload.endLine],
+    symbols: r.payload.symbols || [],
+    imports: r.payload.imports || [],
+    layer: r.payload.layer,
+    service: r.payload.service,
+    preview: String(r.payload.content || '').split('\n').filter(l => l.trim()).slice(0, 1).join(''),
+    score: r.score,
+    ...(connections?.length ? { connections } : {}),
+    ...(r.payload.graphExpanded ? { graphExpanded: true } : {}),
+  };
+}
+
+/**
+ * Fetch 1-hop graph connections for a set of files.
+ */
+async function getConnectionsMap(
+  projectName: string,
+  files: string[]
+): Promise<Map<string, string[]>> {
+  const map = new Map<string, string[]>();
+  for (const file of files.slice(0, 10)) {
+    const expanded = await graphStore.expand(projectName, [file], 1);
+    const connections = expanded.filter(f => f !== file);
+    if (connections.length > 0) map.set(file, connections.slice(0, 5));
+  }
+  return map;
+}
+
+/**
  * Search in a collection
  * POST /api/search
  */
 router.post('/search', validate(searchSchema), asyncHandler(async (req: Request, res: Response) => {
-  const { collection, query, limit = 5, filters, scoreThreshold } = req.body;
+  const { collection, query, limit = 5, filters, scoreThreshold, mode = 'content' } = req.body;
   const projectName = req.headers['x-project-name'] as string || collection.split('_')[0];
 
   // Auto-rewrite query if similar to previously unsuccessful one
@@ -139,6 +173,14 @@ router.post('/search', validate(searchSchema), asyncHandler(async (req: Request,
 
   // Graph-boosted expansion: add related files from dependency graph
   const results = await expandWithGraph(projectName, collection, deduped, queryEmbedding, 3);
+
+  if (mode === 'navigate') {
+    const connectionsMap = await getConnectionsMap(projectName, results.map(r => r.payload.file as string));
+    return res.json({
+      results: results.map(r => toNavigateResult(r, connectionsMap.get(r.payload.file as string))),
+      ...(rewritten ? { queryRewritten: { original: query, rewritten: effectiveQuery, reason } } : {}),
+    });
+  }
 
   res.json({
     results: results.map(r => ({
@@ -179,14 +221,27 @@ router.post('/search-similar', validate(searchSimilarSchema), asyncHandler(async
  * POST /api/search-grouped
  */
 router.post('/search-grouped', validate(searchGroupedSchema), asyncHandler(async (req: Request, res: Response) => {
-  const { collection, query, groupBy = 'file', limit = 10, groupSize = 1, filters, scoreThreshold } = req.body;
+  const { collection, query, groupBy = 'file', limit = 10, groupSize = 1, filters, scoreThreshold, mode = 'content' } = req.body;
 
   const queryEmbedding = await embeddingService.embed(query);
   const filter = buildSearchFilter(filters);
 
+  const projectName = req.headers['x-project-name'] as string || collection.split('_')[0];
   const groups = await vectorStore.searchGroups(
     collection, queryEmbedding, groupBy, limit, groupSize, filter, scoreThreshold
   );
+
+  if (mode === 'navigate') {
+    const allFiles = groups.flatMap(g => g.results.map(r => r.payload.file as string));
+    const connectionsMap = await getConnectionsMap(projectName, allFiles);
+    return res.json({
+      groups: groups.map(g => ({
+        [groupBy]: g.group,
+        results: g.results.map(r => toNavigateResult(r, connectionsMap.get(r.payload.file as string))),
+      })),
+      totalGroups: groups.length,
+    });
+  }
 
   res.json({
     groups: groups.map(g => ({
@@ -207,7 +262,7 @@ router.post('/search-grouped', validate(searchGroupedSchema), asyncHandler(async
  * POST /api/search-hybrid
  */
 router.post('/search-hybrid', validate(searchHybridSchema), asyncHandler(async (req: Request, res: Response) => {
-  const { collection, query, limit = 10, semanticWeight = 0.7, filters } = req.body;
+  const { collection, query, limit = 10, semanticWeight = 0.7, filters, mode = 'content' } = req.body;
   const projectName = req.headers['x-project-name'] as string || collection.split('_')[0];
 
   // Auto-rewrite query if similar to previously unsuccessful one
@@ -229,6 +284,16 @@ router.post('/search-hybrid', validate(searchHybridSchema), asyncHandler(async (
     boosted.sort((a, b) => b.score - a.score);
     const deduped = deduplicateByFile(boosted).slice(0, limit);
     const results = await expandWithGraph(projectName, collection, deduped, dense, 3);
+
+    if (mode === 'navigate') {
+      const connectionsMap = await getConnectionsMap(projectName, results.map(r => r.payload.file as string));
+      return res.json({
+        results: results.map(r => toNavigateResult(r, connectionsMap.get(r.payload.file as string))),
+        query: effectiveQuery,
+        searchMode: 'native-sparse',
+        ...(rewritten ? { queryRewritten: { original: query, rewritten: effectiveQuery, reason } } : {}),
+      });
+    }
 
     return res.json({
       results: results.map(r => ({
@@ -309,6 +374,15 @@ router.post('/search-hybrid', validate(searchHybridSchema), asyncHandler(async (
   }));
   boostedFused.sort((a, b) => b.score - a.score);
   const combinedResults = deduplicateByFile(boostedFused).slice(0, limit);
+
+  if (mode === 'navigate') {
+    const connectionsMap = await getConnectionsMap(projectName, combinedResults.map(r => r.payload.file as string));
+    return res.json({
+      results: combinedResults.map(r => toNavigateResult(r, connectionsMap.get(r.payload.file as string))),
+      query,
+      searchMode: 'text-match-fusion',
+    });
+  }
 
   res.json({
     results: combinedResults.map(r => ({
@@ -461,7 +535,7 @@ router.post('/find-feature', validate(findFeatureSchema), asyncHandler(async (re
  * POST /api/search-graph
  */
 router.post('/search-graph', asyncHandler(async (req: Request, res: Response) => {
-  const { collection, query, limit = 10, expandHops = 1 } = req.body;
+  const { collection, query, limit = 10, expandHops = 1, mode = 'content' } = req.body;
 
   if (!collection || !query) {
     return res.status(400).json({ error: 'collection and query are required' });
@@ -494,6 +568,22 @@ router.post('/search-graph', asyncHandler(async (req: Request, res: Response) =>
       });
       graphResults.push(...fileResults);
     }
+  }
+
+  if (mode === 'navigate') {
+    const allFiles = [
+      ...semanticResults.map(r => r.payload.file as string),
+      ...graphResults.map(r => r.payload.file as string),
+    ];
+    const connectionsMap = await getConnectionsMap(projectName, allFiles);
+    return res.json({
+      results: semanticResults.map(r => toNavigateResult(r, connectionsMap.get(r.payload.file as string))),
+      graphExpanded: graphResults.map(r => ({
+        ...toNavigateResult(r, connectionsMap.get(r.payload.file as string)),
+        graphExpanded: true,
+      })),
+      expandedFiles,
+    });
   }
 
   res.json({

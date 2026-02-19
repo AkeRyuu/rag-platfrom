@@ -21,10 +21,13 @@ export const limitSchema = z.number().int().min(1).max(100).default(5);
 // Search Schemas
 // ============================================
 
+export const searchModeSchema = z.enum(['content', 'navigate']).optional();
+
 export const searchSchema = z.object({
   collection: collectionNameSchema,
   query: z.string().min(1).max(10000),
   limit: limitSchema.optional(),
+  mode: searchModeSchema,
   filters: z.object({
     language: z.string().optional(),
     path: z.string().optional(),
@@ -151,6 +154,7 @@ export const searchGroupedSchema = z.object({
   groupBy: z.string().default('file'),
   limit: z.number().int().min(1).max(100).default(10),
   groupSize: z.number().int().min(1).max(10).default(1),
+  mode: searchModeSchema,
   filters: z.object({
     language: z.string().optional(),
     path: z.string().optional(),
@@ -165,6 +169,7 @@ export const searchHybridSchema = z.object({
   query: z.string().min(1).max(10000),
   limit: z.number().int().min(1).max(100).default(10),
   semanticWeight: z.number().min(0).max(1).default(0.7),
+  mode: searchModeSchema,
   filters: z.object({
     language: z.string().optional(),
     path: z.string().optional(),

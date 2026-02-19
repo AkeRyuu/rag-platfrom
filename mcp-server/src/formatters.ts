@@ -73,6 +73,28 @@ export function formatMemoryResults(
   return result;
 }
 
+/** Format navigate-mode search results as compact navigation pointers */
+export function formatNavigationResults(
+  results: Array<{
+    file: string; lines?: [number, number]; symbols?: string[];
+    imports?: string[]; connections?: string[]; layer?: string;
+    service?: string; preview?: string; score: number;
+    graphExpanded?: boolean;
+  }>
+): string {
+  if (!results?.length) return "No results found.";
+  return results.map(r => {
+    const loc = r.lines ? `:${r.lines[0]}-${r.lines[1]}` : '';
+    let out = `**${r.file}${loc}** (${pct(r.score)})`;
+    if (r.layer) out += ` [${r.layer}]`;
+    if (r.graphExpanded) out += ' _(graph)_';
+    if (r.preview) out += `\n\`${truncate(r.preview, 100)}\``;
+    if (r.symbols?.length) out += `\nSymbols: ${r.symbols.join(', ')}`;
+    if (r.connections?.length) out += `\nConnections: ${r.connections.map(c => '`' + c + '`').join(', ')}`;
+    return out;
+  }).join('\n\n');
+}
+
 /** Format a simple list of files with scores */
 export function formatFileList(
   files: Array<{ file: string; score?: number }>,

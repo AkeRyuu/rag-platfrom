@@ -4,7 +4,7 @@
  */
 
 import type { ToolModule, ToolHandler, ToolContext } from "../types.js";
-import { formatCodeResults, truncate, pct } from "../formatters.js";
+import { formatCodeResults, formatNavigationResults, truncate, pct } from "../formatters.js";
 
 /**
  * Create the search tools module with project-specific descriptions.
@@ -13,7 +13,7 @@ export function createSearchTools(projectName: string): ToolModule {
   const tools = [
     {
       name: "search_codebase",
-      description: `Search the ${projectName} codebase for relevant code. Returns matching files with code snippets and relevance scores.`,
+      description: `Search the ${projectName} codebase. Returns file locations, symbols, and graph connections. Use Read tool to view the actual code at returned locations.`,
       inputSchema: {
         type: "object" as const,
         properties: {
@@ -67,7 +67,7 @@ export function createSearchTools(projectName: string): ToolModule {
     },
     {
       name: "grouped_search",
-      description: `Search ${projectName} codebase with results grouped by file. Returns one best match per file instead of multiple chunks.`,
+      description: `Search ${projectName} codebase grouped by file. Returns file locations with symbols and connections. Use Read tool to view the actual code.`,
       inputSchema: {
         type: "object" as const,
         properties: {
@@ -103,7 +103,7 @@ export function createSearchTools(projectName: string): ToolModule {
     },
     {
       name: "hybrid_search",
-      description: `Hybrid search combining keyword matching and semantic similarity for ${projectName}. Better for finding exact terms + related concepts.`,
+      description: `Hybrid search combining keyword matching and semantic similarity for ${projectName}. Returns file locations with symbols and connections. Use Read tool to view code.`,
       inputSchema: {
         type: "object" as const,
         properties: {
@@ -189,7 +189,7 @@ export function createSearchTools(projectName: string): ToolModule {
     },
     {
       name: "search_graph",
-      description: `Search ${projectName} codebase with graph expansion. Finds semantically similar code plus connected files via import/call relationships.`,
+      description: `Search ${projectName} codebase with graph expansion. Returns file locations plus connected files via import/call relationships. Use Read tool to view code.`,
       inputSchema: {
         type: "object" as const,
         properties: {
@@ -230,13 +230,14 @@ export function createSearchTools(projectName: string): ToolModule {
         collection: `${ctx.collectionPrefix}codebase`,
         query,
         limit,
+        mode: "navigate",
         filters: { language, path, layer, service },
       });
       const results = response.data.results;
       if (!results || results.length === 0) {
         return "No results found for this query.";
       }
-      return formatCodeResults(results, 500);
+      return formatNavigationResults(results);
     },
 
     search_similar: async (
@@ -275,25 +276,15 @@ export function createSearchTools(projectName: string): ToolModule {
         query,
         groupBy,
         limit,
+        mode: "navigate",
         filters: hasFilters ? filters : undefined,
       });
       const groups = response.data.groups;
       if (!groups || groups.length === 0) {
         return "No results found.";
       }
-      return groups
-        .map((g: any) => {
-          const r = g.results[0];
-          return (
-            `**${g[groupBy]}** (score: ${pct(r.score)})\n` +
-            "```" +
-            (r.language || "") +
-            "\n" +
-            truncate(r.content, 300) +
-            "\n```"
-          );
-        })
-        .join("\n\n---\n\n");
+      const allResults = groups.flatMap((g: any) => g.results);
+      return formatNavigationResults(allResults);
     },
 
     hybrid_search: async (
@@ -315,23 +306,14 @@ export function createSearchTools(projectName: string): ToolModule {
         query,
         limit,
         semanticWeight,
+        mode: "navigate",
         filters: hasFilters ? filters : undefined,
       });
       const results = response.data.results;
       if (!results || results.length === 0) {
         return "No results found.";
       }
-      return results
-        .map(
-          (r: any) =>
-            `**${r.file}** (combined: ${pct(r.score)}${r.semanticScore != null ? `, semantic: ${pct(r.semanticScore)}` : ''}${r.keywordScore != null ? `, keyword: ${pct(r.keywordScore)}` : ''})\n` +
-            "```" +
-            (r.language || "") +
-            "\n" +
-            truncate(r.content, 300) +
-            "\n```"
-        )
-        .join("\n\n---\n\n");
+      return formatNavigationResults(results);
     },
 
     search_docs: async (
@@ -400,37 +382,24 @@ export function createSearchTools(projectName: string): ToolModule {
         query,
         limit,
         expandHops,
+        mode: "navigate",
       });
       const { results, graphExpanded, expandedFiles } = response.data;
+
+      if ((!results || results.length === 0) && (!graphExpanded || graphExpanded.length === 0)) {
+        return "No results found.";
+      }
 
       let output = "";
 
       if (results && results.length > 0) {
         output += "**Direct matches:**\n\n";
-        output += results
-          .map(
-            (r: any) =>
-              `**${r.file}** (score: ${pct(r.score)})\n` +
-              "```" + (r.language || "") + "\n" +
-              truncate(r.content, 300) + "\n```"
-          )
-          .join("\n\n");
+        output += formatNavigationResults(results);
       }
 
       if (graphExpanded && graphExpanded.length > 0) {
         output += "\n\n---\n\n**Graph-connected files:**\n\n";
-        output += graphExpanded
-          .map(
-            (r: any) =>
-              `**${r.file}** (score: ${pct(r.score)})\n` +
-              "```" + (r.language || "") + "\n" +
-              truncate(r.content, 300) + "\n```"
-          )
-          .join("\n\n");
-      }
-
-      if (!output) {
-        return "No results found.";
+        output += formatNavigationResults(graphExpanded);
       }
 
       if (expandedFiles && expandedFiles.length > 0) {
