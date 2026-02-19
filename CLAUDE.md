@@ -119,3 +119,14 @@ Key settings:
 | Ollama | 11434 |
 | BGE-M3 | 8080 |
 | Redis | 6380 |
+
+## RAG Integration
+
+You MUST call `context_briefing` before making any code changes.
+This single tool performs all RAG lookups in parallel (recall, search, patterns, ADRs, graph).
+
+Example: `context_briefing(task: "describe your change", files: ["path/to/file.ts"])`
+
+After completing significant changes:
+- `remember` — save important context for future sessions
+- `record_adr` — document architectural decisions
