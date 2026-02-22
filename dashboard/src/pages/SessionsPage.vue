@@ -55,7 +55,7 @@ async function handleEndSession(id: string) {
       <div style="flex: 1; min-width: 0;">
         <SessionsTable
           :sessions="store.sessions"
-          :selected-id="store.selectedSession?.id"
+          :selected-id="store.selectedSession?.sessionId ?? store.selectedSession?.id"
           @select="store.selectSession"
         />
       </div>

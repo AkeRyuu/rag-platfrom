@@ -1,11 +1,10 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { fetchSessionsList, fetchSessionDetail, endSession as endSessionApi } from '@/api/sessions'
-import type { SessionListItem, SessionDetail } from '@/types/session'
 
 export const useSessionsStore = defineStore('sessions', () => {
-  const sessions = ref<SessionListItem[]>([])
-  const selectedSession = ref<SessionDetail | null>(null)
+  const sessions = ref<Record<string, any>[]>([])
+  const selectedSession = ref<Record<string, any> | null>(null)
   const loading = ref(false)
   const error = ref('')
   const statusFilter = ref<'all' | 'active' | 'ended'>('all')
@@ -32,7 +31,7 @@ export const useSessionsStore = defineStore('sessions', () => {
 
   async function endSession(id: string) {
     await endSessionApi(id)
-    if (selectedSession.value?.id === id) {
+    if (getId(selectedSession.value) === id) {
       selectedSession.value = { ...selectedSession.value, status: 'ended' }
     }
     await loadSessions()
@@ -47,3 +46,7 @@ export const useSessionsStore = defineStore('sessions', () => {
     loadSessions, selectSession, endSession, clearSelection,
   }
 })
+
+function getId(session: Record<string, any> | null): string {
+  return session?.sessionId ?? session?.id ?? ''
+}

@@ -1,5 +1,6 @@
 export interface SessionListItem {
-  id: string
+  id?: string
+  sessionId?: string
   projectName: string
   status: 'active' | 'ended'
   initialContext?: string
@@ -9,7 +10,8 @@ export interface SessionListItem {
 }
 
 export interface SessionDetail {
-  id: string
+  id?: string
+  sessionId?: string
   projectName: string
   status: 'active' | 'ended'
   initialContext?: string

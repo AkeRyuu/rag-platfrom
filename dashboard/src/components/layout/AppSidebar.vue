@@ -25,11 +25,12 @@ const navItems = [
         :key="item.to"
         :to="item.to"
         custom
-        v-slot="{ isActive, navigate }"
+        v-slot="{ isActive, href, navigate }"
       >
         <a
+          :href="href"
           :class="['nav-item', { 'nav-item--active': isActive }]"
-          @click="navigate(); app.isSidebarOpen = false"
+          @click.prevent="navigate(); app.isSidebarOpen = false"
         >
           <i :class="item.icon" style="width: 1.25rem; text-align: center;" />
           {{ item.label }}

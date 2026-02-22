@@ -3,10 +3,13 @@ import Card from 'primevue/card'
 import Button from 'primevue/button'
 import Chip from 'primevue/chip'
 import Tag from 'primevue/tag'
-import type { SessionDetail } from '@/types/session'
 
-defineProps<{ session: SessionDetail }>()
+const props = defineProps<{ session: Record<string, any> }>()
 const emit = defineEmits<{ close: []; 'end-session': [id: string] }>()
+
+function getId(): string {
+  return props.session?.sessionId ?? props.session?.id ?? ''
+}
 </script>
 
 <template>
@@ -21,7 +24,7 @@ const emit = defineEmits<{ close: []; 'end-session': [id: string] }>()
       <div style="display: flex; flex-direction: column; gap: 0.75rem; font-size: 0.875rem;">
         <div>
           <b>ID:</b>
-          <code style="font-size: 0.8rem; margin-left: 0.25rem;">{{ session.id }}</code>
+          <code style="font-size: 0.8rem; margin-left: 0.25rem;">{{ getId() }}</code>
         </div>
         <div>
           <b>Status:</b>
@@ -59,7 +62,7 @@ const emit = defineEmits<{ close: []; 'end-session': [id: string] }>()
         </div>
 
         <div v-if="session.status === 'active'" style="margin-top: 0.5rem;">
-          <Button label="End Session" icon="pi pi-stop-circle" severity="warn" size="small" @click="emit('end-session', session.id)" />
+          <Button label="End Session" icon="pi pi-stop-circle" severity="warn" size="small" @click="emit('end-session', getId())" />
         </div>
       </div>
     </template>

@@ -38,8 +38,8 @@ export async function fetchDependents(file: string, depth = 1): Promise<{ nodes:
   return { nodes, links }
 }
 
-export async function fetchBlastRadius(file: string): Promise<BlastRadiusResult> {
-  const { data } = await client.post('/api/graph/blast-radius', { file })
+export async function fetchBlastRadius(file: string, maxDepth = 3): Promise<BlastRadiusResult> {
+  const { data } = await client.post('/api/graph/blast-radius', { files: [file], maxDepth })
   return {
     affectedFiles: data.affectedFiles ?? [],
     totalAffected: data.totalAffected ?? data.affectedFiles?.length ?? 0,
