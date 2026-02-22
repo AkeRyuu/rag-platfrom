@@ -7,8 +7,8 @@ import {
   fetchDeveloperProfile, fetchCacheAnalytics, fetchFeedbackStats,
 } from '@/api/overview'
 import type {
-  ToolStats, KnowledgeGap, Session, PredictionStats, PlatformStats,
-  DeveloperProfile, CacheStats, FeedbackStats,
+  ToolStats, KnowledgeGap, Session, PlatformStats,
+  DeveloperProfile, CacheStats,
 } from '@/types/api'
 
 export const useOverviewStore = defineStore('overview', () => {
@@ -16,11 +16,11 @@ export const useOverviewStore = defineStore('overview', () => {
   const knowledgeGaps = ref<KnowledgeGap[]>([])
   const qualityMetrics = ref<Record<string, any> | null>(null)
   const recentSessions = ref<Session[]>([])
-  const predictionStats = ref<PredictionStats | null>(null)
+  const predictionStats = ref<Record<string, any> | null>(null)
   const platformStats = ref<PlatformStats | null>(null)
   const developerProfile = ref<DeveloperProfile | null>(null)
   const cacheStats = ref<CacheStats | null>(null)
-  const feedbackStats = ref<FeedbackStats | null>(null)
+  const feedbackStats = ref<Record<string, any> | null>(null)
   const loading = ref(false)
   const error = ref('')
 

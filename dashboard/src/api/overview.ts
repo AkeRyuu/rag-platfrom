@@ -1,7 +1,7 @@
 import client from './client'
 import type {
-  ToolStats, KnowledgeGap, Session, PredictionStats, PlatformStats,
-  DeveloperProfile, CacheStats, FeedbackStats,
+  ToolStats, KnowledgeGap, Session, PlatformStats,
+  DeveloperProfile, CacheStats,
 } from '@/types/api'
 
 export async function fetchToolAnalytics(days = 7): Promise<ToolStats> {
@@ -24,7 +24,7 @@ export async function fetchSessions(limit = 5): Promise<Session[]> {
   return data.sessions ?? []
 }
 
-export async function fetchPredictionStats(): Promise<PredictionStats> {
+export async function fetchPredictionStats(): Promise<Record<string, any>> {
   const { data } = await client.get('/api/predictions/stats')
   return data
 }
@@ -44,7 +44,7 @@ export async function fetchCacheAnalytics(): Promise<CacheStats> {
   return data
 }
 
-export async function fetchFeedbackStats(project: string): Promise<FeedbackStats> {
+export async function fetchFeedbackStats(project: string): Promise<Record<string, any>> {
   const { data } = await client.get(`/api/feedback/stats/${project}`)
   return data
 }

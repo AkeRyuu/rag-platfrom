@@ -3,16 +3,18 @@ import { computed } from 'vue'
 import Card from 'primevue/card'
 import Knob from 'primevue/knob'
 import VChart from 'vue-echarts'
-import type { PredictionStats } from '@/types/api'
 
-const props = defineProps<{ stats?: PredictionStats | null }>()
+const props = defineProps<{ stats?: Record<string, any> | null }>()
 
-const hitPct = computed(() => props.stats ? Math.round(props.stats.hitRate * 100) : 0)
+const hitPct = computed(() => {
+  if (!props.stats) return 0
+  return Math.round((props.stats.hitRate || 0) * 100)
+})
 
 const strategyChart = computed(() => {
-  if (!props.stats?.strategies) return null
-  const entries = Object.entries(props.stats.strategies)
-  if (entries.length === 0) return null
+  const strats = props.stats?.byStrategy ?? props.stats?.strategies
+  if (!strats || Object.keys(strats).length === 0) return null
+  const entries = Object.entries(strats)
   return {
     tooltip: { trigger: 'axis' },
     xAxis: { type: 'category', data: entries.map(e => e[0]) },
@@ -34,7 +36,7 @@ const strategyChart = computed(() => {
             <div style="font-size: 0.75rem; color: var(--p-text-muted-color); margin-top: 0.25rem;">Hit Rate</div>
           </div>
           <div style="font-size: 0.875rem;">
-            <div><b>{{ stats.totalPredictions.toLocaleString() }}</b> predictions</div>
+            <div><b>{{ (stats.totalPredictions ?? 0).toLocaleString() }}</b> predictions</div>
           </div>
         </div>
         <VChart v-if="strategyChart" :option="strategyChart" autoresize style="height: 150px; width: 100%;" />

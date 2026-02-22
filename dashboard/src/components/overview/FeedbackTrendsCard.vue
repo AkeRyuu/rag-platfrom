@@ -2,11 +2,19 @@
 import { computed } from 'vue'
 import Card from 'primevue/card'
 import Knob from 'primevue/knob'
-import type { FeedbackStats } from '@/types/api'
 
-const props = defineProps<{ stats?: FeedbackStats | null }>()
+const props = defineProps<{ stats?: Record<string, any> | null }>()
 
-const helpfulPct = computed(() => props.stats ? Math.round(props.stats.helpfulRate * 100) : 0)
+const helpfulPct = computed(() => {
+  if (!props.stats) return 0
+  const rate = props.stats.searchHelpfulRate ?? props.stats.helpfulRate ?? 0
+  return Math.round((rate || 0) * 100)
+})
+
+const totalFeedback = computed(() => {
+  if (!props.stats) return 0
+  return (props.stats.totalSearchFeedback ?? 0) + (props.stats.totalMemoryFeedback ?? 0) || props.stats.totalFeedback || 0
+})
 </script>
 
 <template>
@@ -20,9 +28,12 @@ const helpfulPct = computed(() => props.stats ? Math.round(props.stats.helpfulRa
           <div style="font-size: 0.75rem; color: var(--p-text-muted-color); margin-top: 0.25rem;">Helpful</div>
         </div>
         <div style="font-size: 0.875rem; display: flex; flex-direction: column; gap: 0.25rem;">
-          <div><b>{{ stats.totalFeedback }}</b> total feedback</div>
-          <div><b>{{ stats.searchFeedback }}</b> search</div>
-          <div><b>{{ stats.memoryFeedback }}</b> memory</div>
+          <div><b>{{ totalFeedback }}</b> total feedback</div>
+          <div><b>{{ stats.totalSearchFeedback ?? stats.searchFeedback ?? 0 }}</b> search</div>
+          <div><b>{{ stats.totalMemoryFeedback ?? stats.memoryFeedback ?? 0 }}</b> memory</div>
+          <div v-if="stats.recentTrend" style="font-size: 0.8rem; color: var(--p-text-muted-color);">
+            Trend: {{ stats.recentTrend }}
+          </div>
         </div>
       </div>
     </template>
