@@ -70,9 +70,17 @@ export interface DeveloperProfile {
 }
 
 export interface CacheStats {
-  hitRate: number
-  totalRequests: number
-  totalHits: number
+  enabled?: boolean
+  connected?: boolean
+  totalKeys?: number
+  embeddingKeys?: number
+  searchKeys?: number
+  sessionKeys?: number
+  memoryUsage?: string
+  // Alternative shape from some endpoints
+  hitRate?: number
+  totalRequests?: number
+  totalHits?: number
   memoryUsageMb?: number
 }
 

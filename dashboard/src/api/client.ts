@@ -19,19 +19,29 @@ client.interceptors.request.use((config) => {
   return config
 })
 
-// Global error interceptor — dispatches toast events for 401/5xx
+// Debounce toast dispatches — max once per 5s per category
+const lastToast: Record<string, number> = {}
+function dispatchToast(key: string, detail: { severity: string; summary: string; detail: string }) {
+  const now = Date.now()
+  if (now - (lastToast[key] || 0) < 5000) return
+  lastToast[key] = now
+  window.dispatchEvent(new CustomEvent('rag-api-error', { detail }))
+}
+
+// Global error interceptor
 client.interceptors.response.use(
   (response) => response,
   (error) => {
     const status = error.response?.status
-    if (status === 401 || status === 403) {
-      window.dispatchEvent(new CustomEvent('rag-api-error', {
-        detail: { severity: 'error', summary: 'Authentication Error', detail: 'Check your API key in Settings' },
-      }))
+    if (status === 400) {
+      const msg = error.response?.data?.error || ''
+      if (/project/i.test(msg)) {
+        dispatchToast('project', { severity: 'warn', summary: 'Project Required', detail: 'Set a project name in Settings' })
+      }
+    } else if (status === 401 || status === 403) {
+      dispatchToast('auth', { severity: 'error', summary: 'Authentication Error', detail: 'Check your API key in Settings' })
     } else if (status && status >= 500) {
-      window.dispatchEvent(new CustomEvent('rag-api-error', {
-        detail: { severity: 'error', summary: 'Server Error', detail: error.response?.data?.error || `HTTP ${status}` },
-      }))
+      dispatchToast('server', { severity: 'error', summary: 'Server Error', detail: error.response?.data?.error || `HTTP ${status}` })
     }
     return Promise.reject(error)
   }

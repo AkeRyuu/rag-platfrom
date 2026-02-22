@@ -31,5 +31,8 @@ const option = computed(() => {
 </script>
 
 <template>
-  <VChart :option="option" style="height: 250px;" autoresize />
+  <VChart v-if="callsByHour && Object.keys(callsByHour).length > 0" :option="option" style="height: 250px;" autoresize />
+  <div v-else style="height: 250px; display: flex; align-items: center; justify-content: center; color: var(--p-text-muted-color); font-size: 0.875rem;">
+    No data
+  </div>
 </template>
