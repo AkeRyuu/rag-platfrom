@@ -6,6 +6,7 @@ export interface Memory {
   type: MemoryType
   tags: string[]
   relatedTo?: string
+  score?: number
   createdAt: string
   validated?: boolean
   metadata?: Record<string, unknown>
@@ -24,4 +25,9 @@ export interface QuarantineMemory {
   confidence?: number
   source?: string
   createdAt: string
+}
+
+export interface MergeCluster {
+  count: number
+  items: { id: string; content: string }[]
 }

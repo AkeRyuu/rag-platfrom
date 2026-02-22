@@ -22,6 +22,21 @@ const router = createRouter({
       name: 'collections',
       component: () => import('@/pages/CollectionsPage.vue'),
     },
+    {
+      path: '/sessions',
+      name: 'sessions',
+      component: () => import('@/pages/SessionsPage.vue'),
+    },
+    {
+      path: '/graph',
+      name: 'graph',
+      component: () => import('@/pages/GraphPage.vue'),
+    },
+    {
+      path: '/settings',
+      name: 'settings',
+      component: () => import('@/pages/SettingsPage.vue'),
+    },
   ],
 })
 

@@ -37,8 +37,17 @@ function relativeDate(iso: string) {
     <template #content>
       <div style="display: flex; flex-direction: column; gap: 0.5rem; height: 100%;">
         <div style="display: flex; justify-content: space-between; align-items: center;">
-          <Tag :severity="(typeColors[memory.type] as any) || 'secondary'" :value="memory.type" />
+          <div style="display: flex; align-items: center; gap: 0.5rem;">
+            <Tag :severity="(typeColors[memory.type] as any) || 'secondary'" :value="memory.type" />
+            <span v-if="memory.score != null" style="font-size: 0.7rem; color: var(--p-text-muted-color);">
+              {{ (memory.score * 100).toFixed(0) }}%
+            </span>
+          </div>
           <span style="font-size: 0.75rem; color: var(--p-text-muted-color);">{{ relativeDate(memory.createdAt) }}</span>
+        </div>
+
+        <div v-if="memory.relatedTo" style="font-size: 0.75rem; color: var(--p-text-muted-color);">
+          Related: {{ memory.relatedTo }}
         </div>
 
         <div style="flex: 1; font-size: 0.875rem; line-height: 1.4; white-space: pre-wrap; word-break: break-word;">

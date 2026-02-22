@@ -1,5 +1,8 @@
 import client from './client'
-import type { ToolStats, KnowledgeGap, QualityMetrics, Session, PredictionStats } from '@/types/api'
+import type {
+  ToolStats, KnowledgeGap, QualityMetrics, Session, PredictionStats, PlatformStats,
+  DeveloperProfile, CacheStats, FeedbackStats,
+} from '@/types/api'
 
 export async function fetchToolAnalytics(days = 7): Promise<ToolStats> {
   const { data } = await client.get('/api/tool-analytics', { params: { days } })
@@ -23,5 +26,25 @@ export async function fetchSessions(limit = 5): Promise<Session[]> {
 
 export async function fetchPredictionStats(): Promise<PredictionStats> {
   const { data } = await client.get('/api/predictions/stats')
+  return data
+}
+
+export async function fetchPlatformStats(): Promise<PlatformStats> {
+  const { data } = await client.get('/api/platform/stats')
+  return data
+}
+
+export async function fetchDeveloperProfile(): Promise<DeveloperProfile> {
+  const { data } = await client.get('/api/developer-profile')
+  return data
+}
+
+export async function fetchCacheAnalytics(): Promise<CacheStats> {
+  const { data } = await client.get('/api/cache/analytics')
+  return data
+}
+
+export async function fetchFeedbackStats(project: string): Promise<FeedbackStats> {
+  const { data } = await client.get(`/api/feedback/stats/${project}`)
   return data
 }

@@ -61,3 +61,24 @@ export interface PlatformStats {
     totalVectors: number
   }[]
 }
+
+export interface DeveloperProfile {
+  frequentFiles: { file: string; count: number }[]
+  preferredTools: string[]
+  peakHours: Record<string, number>
+  commonPatterns: string[]
+}
+
+export interface CacheStats {
+  hitRate: number
+  totalRequests: number
+  totalHits: number
+  memoryUsageMb?: number
+}
+
+export interface FeedbackStats {
+  totalFeedback: number
+  helpfulRate: number
+  searchFeedback: number
+  memoryFeedback: number
+}

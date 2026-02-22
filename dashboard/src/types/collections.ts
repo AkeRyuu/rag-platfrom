@@ -4,16 +4,16 @@ export interface CollectionSummary {
   status: string
 }
 
+export type VectorParams = { size?: number; distance?: string }
+export type VectorsConfig = Record<string, VectorParams> | VectorParams
+
 export interface CollectionInfo {
   name: string
   vectorsCount: number
   status: string
   config?: {
     params?: {
-      vectors?: {
-        size?: number
-        distance?: string
-      }
+      vectors?: VectorsConfig
     }
   }
   segments?: number
@@ -35,4 +35,23 @@ export interface IndexStatus {
 export interface AliasInfo {
   aliasName: string
   collectionName: string
+}
+
+export interface Snapshot {
+  name: string
+  creationTime: string
+  size: number
+}
+
+export interface CollectionAnalytics {
+  vectors: number
+  segments: number
+  diskUsageMb?: number
+  languageBreakdown?: Record<string, number>
+}
+
+export interface ClusterHealth {
+  status: string
+  nodes?: number
+  pendingOperations?: number
 }

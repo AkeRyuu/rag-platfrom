@@ -1,13 +1,14 @@
 import client from './client'
-import type { Memory, MemoryType, MemoryStats, QuarantineMemory } from '@/types/memory'
+import type { Memory, MemoryType, MemoryStats, QuarantineMemory, MergeCluster } from '@/types/memory'
 
 export async function fetchMemoryList(params: {
   type?: MemoryType | 'all'
   tag?: string
   limit?: number
-}): Promise<Memory[]> {
+  offset?: number
+}): Promise<{ memories: Memory[]; total: number }> {
   const { data } = await client.get('/api/memory/list', { params })
-  return data.memories ?? []
+  return { memories: data.memories ?? [], total: data.total ?? data.memories?.length ?? 0 }
 }
 
 export async function fetchMemoryStats(): Promise<MemoryStats> {
@@ -17,6 +18,11 @@ export async function fetchMemoryStats(): Promise<MemoryStats> {
 
 export async function fetchQuarantine(limit = 20): Promise<QuarantineMemory[]> {
   const { data } = await client.get('/api/memory/quarantine', { params: { limit } })
+  return data.memories ?? []
+}
+
+export async function fetchUnvalidated(limit = 20): Promise<QuarantineMemory[]> {
+  const { data } = await client.get('/api/memory/unvalidated', { params: { limit } })
   return data.memories ?? []
 }
 
@@ -36,4 +42,22 @@ export async function validateMemory(id: string, validated: boolean): Promise<vo
 
 export async function promoteMemory(memoryId: string, reason: string): Promise<void> {
   await client.post('/api/memory/promote', { memoryId, reason })
+}
+
+export async function createMemoryApi(params: {
+  type: MemoryType
+  content: string
+  relatedTo?: string
+  tags: string[]
+}): Promise<void> {
+  await client.post('/api/memory', params)
+}
+
+export async function mergeMemoriesApi(dryRun: boolean): Promise<MergeCluster[]> {
+  const { data } = await client.post('/api/memory/merge', { dryRun })
+  return data.clusters ?? []
+}
+
+export async function bulkDeleteByTypeApi(type: MemoryType): Promise<void> {
+  await client.delete(`/api/memory/type/${type}`)
 }
