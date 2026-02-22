@@ -1,6 +1,6 @@
 import client from './client'
 import type {
-  ToolStats, KnowledgeGap, QualityMetrics, Session, PredictionStats, PlatformStats,
+  ToolStats, KnowledgeGap, Session, PredictionStats, PlatformStats,
   DeveloperProfile, CacheStats, FeedbackStats,
 } from '@/types/api'
 
@@ -14,7 +14,7 @@ export async function fetchKnowledgeGaps(limit = 20): Promise<KnowledgeGap[]> {
   return data.gaps ?? []
 }
 
-export async function fetchQualityMetrics(project: string): Promise<QualityMetrics> {
+export async function fetchQualityMetrics(project: string): Promise<Record<string, any>> {
   const { data } = await client.get(`/api/quality/${project}`)
   return data
 }
