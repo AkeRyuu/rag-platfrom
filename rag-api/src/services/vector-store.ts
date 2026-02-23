@@ -716,6 +716,39 @@ class VectorStoreService {
   }
 
   /**
+   * Scroll collection with optional vectors for frontend visualization
+   */
+  async scrollCollection(collection: string, limit = 100, offset?: string, withVectors = false): Promise<{
+    points: Array<{ id: string | number; payload: Record<string, unknown>; vector?: number[] }>;
+    nextOffset?: string | number;
+  }> {
+    try {
+      const response = await this.client.scroll(collection, {
+        limit,
+        offset: offset || undefined,
+        with_payload: true,
+        with_vector: withVectors,
+      });
+
+      const points = response.points.map((p: any) => ({
+        id: p.id,
+        payload: p.payload as Record<string, unknown>,
+        vector: withVectors ? (Array.isArray(p.vector) ? p.vector : p.vector?.dense || undefined) : undefined,
+      }));
+
+      return {
+        points,
+        nextOffset: response.next_page_offset as string | number | undefined,
+      };
+    } catch (error: any) {
+      if (error.status === 404) {
+        return { points: [] };
+      }
+      throw error;
+    }
+  }
+
+  /**
    * Get aggregated stats using indexed fields for efficiency
    * Falls back to scroll for unique file count (unavoidable for uniqueness)
    */

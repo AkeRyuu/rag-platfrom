@@ -17,3 +17,19 @@ export async function fetchSessionDetail(sessionId: string): Promise<SessionDeta
 export async function endSession(sessionId: string): Promise<void> {
   await client.post(`/api/session/${sessionId}/end`)
 }
+
+export async function fetchSessionActivity(sessionId: string): Promise<any[]> {
+  try {
+    const { data } = await client.get(`/api/session/${sessionId}`)
+    // Extract tool call activity from session detail
+    return data.toolCalls || data.activity || data.recentQueries?.map((q: string, i: number) => ({
+      id: `q-${i}`,
+      type: 'query',
+      tool: 'search',
+      query: q,
+      timestamp: data.startedAt,
+    })) || []
+  } catch {
+    return []
+  }
+}

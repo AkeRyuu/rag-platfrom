@@ -1,15 +1,50 @@
 <script setup lang="ts">
+import { ref, watch, onUnmounted } from 'vue'
 import Card from 'primevue/card'
 import Button from 'primevue/button'
 import Chip from 'primevue/chip'
 import Tag from 'primevue/tag'
+import SessionTimeline from './SessionTimeline.vue'
+import { fetchSessionActivity } from '@/api/sessions'
 
 const props = defineProps<{ session: Record<string, any> }>()
 const emit = defineEmits<{ close: []; 'end-session': [id: string] }>()
 
+const activities = ref<any[]>([])
+let pollTimer: ReturnType<typeof setInterval> | null = null
+
 function getId(): string {
   return props.session?.sessionId ?? props.session?.id ?? ''
 }
+
+async function loadActivity() {
+  const id = getId()
+  if (!id) return
+  activities.value = await fetchSessionActivity(id)
+}
+
+// Poll for active sessions
+watch(() => getId(), (id) => {
+  if (pollTimer) { clearInterval(pollTimer); pollTimer = null }
+  activities.value = []
+  if (id) {
+    loadActivity()
+    if (props.session.status === 'active') {
+      pollTimer = setInterval(loadActivity, 10000)
+    }
+  }
+}, { immediate: true })
+
+watch(() => props.session.status, (status) => {
+  if (status !== 'active' && pollTimer) {
+    clearInterval(pollTimer)
+    pollTimer = null
+  }
+})
+
+onUnmounted(() => {
+  if (pollTimer) clearInterval(pollTimer)
+})
 </script>
 
 <template>
@@ -60,6 +95,9 @@ function getId(): string {
             <li v-for="q in session.recentQueries" :key="q">{{ q }}</li>
           </ul>
         </div>
+
+        <!-- Live Activity -->
+        <SessionTimeline :activities="activities" />
 
         <div v-if="session.status === 'active'" style="margin-top: 0.5rem;">
           <Button label="End Session" icon="pi pi-stop-circle" severity="warn" size="small" @click="emit('end-session', getId())" />

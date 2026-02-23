@@ -11,6 +11,7 @@ import {
   getCollectionName,
   reindexWithZeroDowntime,
   getAliasInfo,
+  indexEventEmitter,
 } from '../services/indexer';
 import { vectorStore } from '../services/vector-store';
 import { confluenceService } from '../services/confluence';
@@ -160,6 +161,41 @@ router.get('/stats/:collection', asyncHandler(async (req: Request, res: Response
   });
 }));
 
+/**
+ * SSE stream for indexing progress
+ * GET /api/index/status/:collection/stream
+ */
+router.get('/index/status/:collection/stream', (req: Request, res: Response) => {
+  const { collection } = req.params;
+  const projectName = collection.replace(/_codebase$|_docs$|_code$/, '');
+
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    Connection: 'keep-alive',
+    'X-Accel-Buffering': 'no',
+  });
+
+  // Send initial status
+  const initial = getIndexStatus(projectName);
+  res.write(`data: ${JSON.stringify(initial)}\n\n`);
+
+  const onProgress = (data: any) => {
+    if (data.projectName === projectName || collection.startsWith(data.projectName)) {
+      res.write(`data: ${JSON.stringify(data)}\n\n`);
+      if (data.status === 'completed' || data.status === 'error') {
+        res.end();
+      }
+    }
+  };
+
+  indexEventEmitter.on('progress', onProgress);
+
+  req.on('close', () => {
+    indexEventEmitter.off('progress', onProgress);
+  });
+});
+
 // ============================================
 // Collection Management Routes
 // ============================================
@@ -252,6 +288,20 @@ router.get('/collections/:name/info', asyncHandler(async (req: Request, res: Res
   const { name } = req.params;
   const info = await vectorStore.getCollectionInfo(name);
   res.json(info);
+}));
+
+/**
+ * Scroll collection points (with optional vectors)
+ * GET /api/collections/:name/scroll
+ */
+router.get('/collections/:name/scroll', asyncHandler(async (req: Request, res: Response) => {
+  const { name } = req.params;
+  const limit = Math.min(parseInt(req.query.limit as string) || 100, 500);
+  const offset = req.query.offset as string | undefined;
+  const withVectors = req.query.vectors === 'true';
+
+  const result = await vectorStore.scrollCollection(name, limit, offset, withVectors);
+  res.json(result);
 }));
 
 // ============================================

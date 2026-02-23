@@ -6,10 +6,13 @@ const app = useAppStore()
 
 const navItems = [
   { to: '/overview', icon: 'pi pi-chart-bar', label: 'Overview' },
+  { to: '/search', icon: 'pi pi-search', label: 'Search' },
   { to: '/memory', icon: 'pi pi-database', label: 'Memory' },
   { to: '/collections', icon: 'pi pi-server', label: 'Collections' },
   { to: '/sessions', icon: 'pi pi-clock', label: 'Sessions' },
   { to: '/graph', icon: 'pi pi-sitemap', label: 'Graph' },
+  { to: '/quality', icon: 'pi pi-check-circle', label: 'Quality' },
+  { to: '/vectors', icon: 'pi pi-th-large', label: 'Vectors' },
   { to: '/settings', icon: 'pi pi-cog', label: 'Settings' },
 ]
 </script>

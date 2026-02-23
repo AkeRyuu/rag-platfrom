@@ -13,6 +13,11 @@ const router = createRouter({
       component: () => import('@/pages/OverviewPage.vue'),
     },
     {
+      path: '/search',
+      name: 'search',
+      component: () => import('@/pages/SearchPage.vue'),
+    },
+    {
       path: '/memory',
       name: 'memory',
       component: () => import('@/pages/MemoryPage.vue'),
@@ -31,6 +36,16 @@ const router = createRouter({
       path: '/graph',
       name: 'graph',
       component: () => import('@/pages/GraphPage.vue'),
+    },
+    {
+      path: '/quality',
+      name: 'quality',
+      component: () => import('@/pages/QualityPage.vue'),
+    },
+    {
+      path: '/vectors',
+      name: 'vectors',
+      component: () => import('@/pages/VectorSpacePage.vue'),
     },
     {
       path: '/settings',

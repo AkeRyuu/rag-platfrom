@@ -6,6 +6,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
 import { execSync } from 'child_process';
+import { EventEmitter } from 'events';
 import { vectorStore, VectorPoint, SparseVectorPoint } from './vector-store';
 import { embeddingService } from './embedding';
 import { cacheService } from './cache';
@@ -46,6 +47,17 @@ interface IndexProgress {
 
 // Track indexing progress per project
 const indexProgress: Map<string, IndexProgress> = new Map();
+
+// Event emitter for SSE progress streaming
+export const indexEventEmitter = new EventEmitter();
+indexEventEmitter.setMaxListeners(50);
+
+function emitProgress(projectName: string) {
+  const progress = indexProgress.get(projectName);
+  if (progress) {
+    indexEventEmitter.emit('progress', { projectName, ...progress });
+  }
+}
 
 // Default patterns
 const DEFAULT_PATTERNS = [
@@ -652,6 +664,7 @@ export async function indexProject(options: IndexOptions): Promise<IndexStats> {
       // Update progress
       const progress = indexProgress.get(projectName)!;
       progress.processedFiles = Math.min(i + fileBatchSize, filesToIndex.length);
+      emitProgress(projectName);
 
       logger.debug(`Progress: ${progress.processedFiles}/${filesToIndex.length} files, ${stats.totalChunks} chunks`);
     }
@@ -665,6 +678,7 @@ export async function indexProject(options: IndexOptions): Promise<IndexStats> {
     const progress = indexProgress.get(projectName)!;
     progress.status = 'completed';
     progress.completedAt = new Date();
+    emitProgress(projectName);
 
     // Invalidate search cache for this collection
     await cacheService.invalidateCollection(collectionName);
@@ -675,6 +689,7 @@ export async function indexProject(options: IndexOptions): Promise<IndexStats> {
     const progress = indexProgress.get(projectName)!;
     progress.status = 'error';
     progress.error = error.message;
+    emitProgress(projectName);
 
     logger.error(`Indexing failed for ${projectName}`, { error: error.message, stack: error.stack, data: error.data || error.response?.data });
     throw error;

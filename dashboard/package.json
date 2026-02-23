@@ -9,17 +9,22 @@
     "preview": "vite preview --port 3000"
   },
   "dependencies": {
+    "@primevue/themes": "^4.2.5",
     "axios": "^1.7.9",
     "echarts": "^5.5.1",
+    "file-saver": "^2.0.5",
+    "highlight.js": "^11.11.1",
+    "html2canvas": "^1.4.1",
+    "jspdf": "^4.2.0",
     "pinia": "^2.3.0",
-    "primevue": "^4.2.5",
-    "@primevue/themes": "^4.2.5",
     "primeicons": "^7.0.0",
+    "primevue": "^4.2.5",
     "vue": "^3.5.13",
     "vue-echarts": "^7.0.3",
     "vue-router": "^4.5.0"
   },
   "devDependencies": {
+    "@types/file-saver": "^2.0.7",
     "@vitejs/plugin-vue": "^5.2.1",
     "typescript": "~5.6.0",
     "vite": "^6.0.0",
