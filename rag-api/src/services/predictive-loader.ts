@@ -526,12 +526,11 @@ class PredictiveLoaderService {
     switch (prediction.type) {
       case 'file':
       case 'feature': {
-        // Prefetch embedding for the resource
-        await embeddingService.embedWithSession(prediction.resource, cacheOptions);
+        // Prefetch embedding for the resource (with session caching)
+        const embedding = await embeddingService.embedWithSession(prediction.resource, cacheOptions);
 
         // Also prefetch search results for codebase
         const collection = `${projectName}_codebase`;
-        const embedding = await embeddingService.embed(prediction.resource);
         const results = await vectorStore.search(collection, embedding, 5);
 
         if (results.length > 0) {
@@ -550,12 +549,11 @@ class PredictiveLoaderService {
 
       case 'query':
       case 'tool_input': {
-        // Prefetch embedding for the query
-        await embeddingService.embedWithSession(prediction.resource, cacheOptions);
+        // Prefetch embedding for the query (with session caching)
+        const embedding = await embeddingService.embedWithSession(prediction.resource, cacheOptions);
 
         // Prefetch search results in codebase collection
         const collection = `${projectName}_codebase`;
-        const embedding = await embeddingService.embed(prediction.resource);
         const results = await vectorStore.search(collection, embedding, 5);
 
         if (results.length > 0) {

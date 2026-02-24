@@ -8,9 +8,12 @@
 import { v4 as uuidv4 } from 'uuid';
 import { vectorStore, VectorPoint } from './vector-store';
 import { embeddingService } from './embedding';
+import { cacheService } from './cache';
 import { logger } from '../utils/logger';
 import { graphEdgesTotal, graphExpansionDuration } from '../utils/metrics';
 import type { GraphEdge } from './parsers/ast-parser';
+
+const GRAPH_EXPAND_CACHE_TTL = 300; // 5 minutes
 
 class GraphStoreService {
   private getCollectionName(projectName: string): string {
@@ -77,6 +80,15 @@ class GraphStoreService {
    */
   async expand(projectName: string, files: string[], hops: number = 1): Promise<string[]> {
     const startTime = Date.now();
+
+    // Check cache first
+    const cacheKey = `graph:expand:${projectName}:${files.sort().join(',')}:${hops}`;
+    const cached = await cacheService.get<string[]>(cacheKey);
+    if (cached) {
+      graphExpansionDuration.observe({ project: projectName }, (Date.now() - startTime) / 1000);
+      return cached;
+    }
+
     const collection = this.getCollectionName(projectName);
     const visited = new Set<string>(files);
     let frontier = [...files];
@@ -113,8 +125,11 @@ class GraphStoreService {
       }
     }
 
+    const result = [...visited];
+    await cacheService.set(cacheKey, result, GRAPH_EXPAND_CACHE_TTL);
+
     graphExpansionDuration.observe({ project: projectName }, (Date.now() - startTime) / 1000);
-    return [...visited];
+    return result;
   }
 
   /**

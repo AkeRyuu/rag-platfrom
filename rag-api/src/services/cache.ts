@@ -18,11 +18,11 @@ import { logger } from '../utils/logger';
 const TTL = {
   // Session-level (L1) - hot cache
   SESSION_EMBEDDING: 1800,      // 30 minutes
-  SESSION_SEARCH: 180,          // 3 minutes
+  SESSION_SEARCH: 1800,         // 30 minutes
 
   // Project-level (L2) - warm cache
   EMBEDDING: 3600,              // 1 hour
-  SEARCH: 300,                  // 5 minutes
+  SEARCH: 1800,                 // 30 minutes
   COLLECTION_INFO: 30,          // 30 seconds
   CONFLUENCE_PAGE: 3600,        // 1 hour
 

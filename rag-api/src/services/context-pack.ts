@@ -97,9 +97,16 @@ class ContextPackBuilder {
 
       const allChunks: RankedChunk[] = [];
 
-      for (const facet of facets) {
-        try {
-          const results = await this.retrieveFacet(facet, embedding, query, semanticWeight, sparseEmbedding);
+      // Parallel facet retrieval
+      const facetResults = await Promise.allSettled(
+        facets.map(facet => this.retrieveFacet(facet, embedding, query, semanticWeight, sparseEmbedding)
+          .then(results => ({ facet, results }))
+        )
+      );
+
+      for (const result of facetResults) {
+        if (result.status === 'fulfilled') {
+          const { facet, results } = result.value;
           for (const r of results) {
             allChunks.push({
               file: (r.payload.file as string) || 'unknown',
@@ -110,8 +117,8 @@ class ContextPackBuilder {
               tokens: this.estimateTokens((r.payload.content as string) || ''),
             });
           }
-        } catch (error: any) {
-          logger.debug(`Facet ${facet.name} retrieval failed`, { error: error.message });
+        } else {
+          logger.debug(`Facet retrieval failed`, { error: result.reason?.message });
         }
       }
 
