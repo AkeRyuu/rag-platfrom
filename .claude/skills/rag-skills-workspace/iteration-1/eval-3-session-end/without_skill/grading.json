@@ -1,0 +1,106 @@
+{
+  "expectations": [
+    {
+      "text": "Calls summarize_changes to capture what was done",
+      "passed": false,
+      "evidence": "The without_skill transcript and metrics.json show 19 tool calls with breakdown: recall x2, list_memories x1, summarize_context x1, get_developer_profile x1, get_tech_debt x1, get_adrs x1, Grep x2, Glob x2, Read x4, remember x3, Write x1. The mcp__rag__summarize_changes tool is entirely absent. Instead of calling summarize_changes, the agent manually read files and grepped for changes."
+    },
+    {
+      "text": "Calls analyze_conversation or auto_remember to extract learnings",
+      "passed": false,
+      "evidence": "Neither analyze_conversation nor auto_remember appears in the metrics.json tool breakdown or the transcript. The without_skill agent saved learnings using direct remember() calls (steps 16-18) without first using the dedicated learning-extraction tools. The transcript records no use of analyze_conversation or auto_remember."
+    },
+    {
+      "text": "Calls end_session with a summary and autoSaveLearnings: true",
+      "passed": false,
+      "evidence": "The mcp__rag__end_session tool does not appear anywhere in the without_skill transcript or metrics.json tool breakdown. The session was never formally closed. The agent saved memories but skipped the session lifecycle step entirely."
+    },
+    {
+      "text": "Presents a summary showing what was saved for future sessions",
+      "passed": true,
+      "evidence": "The transcript ends with a '## Summary' section listing all 3 saved memories: (1) Context (session-end) with full session state, (2) Insight (architecture) with feature estimator pattern and MCP server architecture, (3) Todo (uncommitted) with files list. IDs and recall verification results are included."
+    },
+    {
+      "text": "Does not force-save empty or trivial memories",
+      "passed": true,
+      "evidence": "Three memories were saved with substantive content: context memory covering modified/new files and work done (steps 16), insight memory covering architectural decisions from the session (step 17), and todo memory covering specific files to commit (step 18). All have real content, not trivial filler."
+    }
+  ],
+  "summary": {
+    "passed": 2,
+    "failed": 3,
+    "total": 5,
+    "pass_rate": 0.4
+  },
+  "execution_metrics": {
+    "tool_calls": {
+      "mcp__rag__recall": 2,
+      "mcp__rag__list_memories": 1,
+      "mcp__rag__summarize_context": 1,
+      "mcp__rag__get_developer_profile": 1,
+      "mcp__rag__get_tech_debt": 1,
+      "mcp__rag__get_adrs": 1,
+      "Grep": 2,
+      "Glob": 2,
+      "Read": 4,
+      "mcp__rag__remember": 3,
+      "Write": 1
+    },
+    "total_tool_calls": 19,
+    "total_steps": null,
+    "errors_encountered": 0,
+    "output_chars": null,
+    "transcript_chars": 3521
+  },
+  "timing": {
+    "executor_duration_seconds": 218.4,
+    "grader_duration_seconds": null,
+    "total_duration_seconds": 218.4
+  },
+  "claims": [
+    {
+      "claim": "All memories verified as retrievable via recall query",
+      "type": "factual",
+      "verified": true,
+      "evidence": "Transcript step 19: recall verification query returned all 3 newly saved memories with relevance scores 63.4%, 58.6%, and 47.7%. Metrics.json verification section confirms recall_successful: true with top score 0.634."
+    },
+    {
+      "claim": "Saved 3 memories to RAG agent memory",
+      "type": "factual",
+      "verified": true,
+      "evidence": "Metrics.json memories_saved.total: 3 with distinct IDs (77cbf6d8, ae5ea89f, 27c956a2). Transcript steps 16-18 each record a successful remember() call with returned memory ID."
+    },
+    {
+      "claim": "The agent understood what work was done this session",
+      "type": "quality",
+      "verified": true,
+      "evidence": "The agent read new files (pm.ts route, feature-estimator.ts) and modified files (mcp-server/src/index.ts, types.ts, tools/pm.ts), and correctly identified the work as MCP server modernization and feature estimator extraction. The summary accurately captures what changed."
+    },
+    {
+      "claim": "The without-skill agent achieved comparable outcomes through alternative means",
+      "type": "quality",
+      "verified": false,
+      "evidence": "The agent saved context and insights but did not call summarize_changes, analyze_conversation, auto_remember, or end_session. Critical workflow steps were omitted. The session remains open. Future sessions will not benefit from session continuity features (auto-resume, profile aggregation) that depend on a closed session."
+    }
+  ],
+  "user_notes_summary": {
+    "uncertainties": [],
+    "needs_review": [],
+    "workarounds": []
+  },
+  "eval_feedback": {
+    "suggestions": [
+      {
+        "assertion": "Presents a summary showing what was saved for future sessions",
+        "reason": "This assertion passes for both runs even though without_skill fails 3 of 5 expectations. The assertion is too easy to satisfy — any agent that saves even one memory and lists it will pass. Consider requiring the summary to confirm session closure or reference the session ID that was ended."
+      },
+      {
+        "reason": "No assertion checks whether the saved memories are retrievable in a future session. The without_skill run does a recall verification, but the with_skill run does not. An assertion that verifies recall of saved memories would catch quality gaps and give extra credit for thoroughness."
+      },
+      {
+        "reason": "The contrast between with_skill (5/5 pass, 581s, 2 tool errors) and without_skill (2/5 pass, 218s) is meaningful, but the without_skill run is faster because it skips the most expensive operations (analyze_conversation, end_session). Consider whether timing should factor into grading — the skill's value includes session lifecycle management, not just speed."
+      }
+    ],
+    "overall": "The evals correctly discriminate the with_skill vs without_skill runs on the three workflow-critical expectations (summarize_changes, analyze_conversation/auto_remember, end_session). The two easier assertions (summary presentation, no trivial memories) pass in both runs, which is appropriate. The main gap is no assertion verifying downstream retrievability of saved context."
+  }
+}

@@ -1,0 +1,110 @@
+{
+  "expectations": [
+    {
+      "text": "Calls get_adrs to find existing caching decisions",
+      "passed": true,
+      "evidence": "Transcript Tool Call 1: 'get_adrs (query: \"caching embedding Redis LRU\")' — returned 6 ADRs, none about caching. Confirmed in metrics.json: mcp__rag__get_adrs: 1."
+    },
+    {
+      "text": "Calls get_patterns to find caching patterns",
+      "passed": false,
+      "evidence": "metrics.json lists only 3 RAG tools: mcp__rag__get_adrs, mcp__rag__recall, mcp__rag__hybrid_search. get_patterns is absent. The transcript (12 tool calls documented) has no mention of get_patterns being called. The without_skill run skipped this tool entirely."
+    },
+    {
+      "text": "Calls get_tech_debt to check known cache-related issues",
+      "passed": false,
+      "evidence": "metrics.json rag_tool_calls: 3 (get_adrs, recall, hybrid_search only). get_tech_debt does not appear anywhere in the transcript or metrics. The without_skill run did not call this tool."
+    },
+    {
+      "text": "Presents options with pros/cons based on existing architecture",
+      "passed": true,
+      "evidence": "analysis.md presents three options (A: In-Memory LRU, B: Redis optimization, C: Hybrid) each with explicit Pros and Cons sections. Options are grounded in direct code analysis — cache.ts (684 lines) and embedding.ts (352 lines) were read, yielding specific findings like serial batch checks, single Redis connection bottleneck, and JSON serialization overhead per embedding."
+    },
+    {
+      "text": "Waits for user decision before recording ADR",
+      "passed": false,
+      "evidence": "Neither the transcript nor the metrics.json shows any explicit deferral of ADR recording. The without_skill metrics.json has no 'skill_steps_completed' tracking field. The analysis.md closes with '**Record an ADR for \"Hybrid embedding cache with in-memory L0 + Redis L1-L3\"**' as a forward instruction to the user, but this is ambiguous — it is not a statement that the agent will wait. There is no equivalent of the with_skill run's 'step_4_note: Waiting for user decision before recording ADR'. The run's transcript ends after delivering the analysis, with no explicit confirmation-gate language."
+    }
+  ],
+  "summary": {
+    "passed": 2,
+    "failed": 3,
+    "total": 5,
+    "pass_rate": 0.4
+  },
+  "execution_metrics": {
+    "tool_calls": {
+      "mcp__rag__get_adrs": 1,
+      "mcp__rag__recall": 1,
+      "mcp__rag__hybrid_search": 1,
+      "Read": 3,
+      "Grep": 5,
+      "Glob": 3,
+      "Write": 3
+    },
+    "total_tool_calls": 17,
+    "rag_tool_calls": 3,
+    "non_rag_tool_calls": 14,
+    "output_files_written": 3,
+    "output_chars": null,
+    "transcript_chars": 3500
+  },
+  "timing": {
+    "executor_duration_seconds": 146.9,
+    "grader_duration_seconds": null,
+    "total_duration_seconds": 146.9
+  },
+  "claims": [
+    {
+      "claim": "No existing ADRs cover caching strategy",
+      "type": "factual",
+      "verified": true,
+      "evidence": "Tool Call 1 (get_adrs) returned 6 ADRs; transcript and analysis.md both enumerate them and confirm none relate to caching. Consistent across both artifacts."
+    },
+    {
+      "claim": "All cache layers are Redis-based; no in-memory LRU exists",
+      "type": "factual",
+      "verified": true,
+      "evidence": "Read of cache.ts (684 lines) confirmed Redis L1/L2/L3 implementation. Grep for LRU/in-memory/Map patterns found only temporary computation Maps, not embedding caches. package.json shows no lru-cache dependency. analysis.md: 'There is no in-memory LRU cache. Every cache lookup requires a Redis round-trip.'"
+    },
+    {
+      "claim": "Serial cache checks in batch operations are a performance hotspot",
+      "type": "factual",
+      "verified": true,
+      "evidence": "Tool Call 2 (recall) retrieved the Feb 2026 Performance Audit memory identifying 'Serial cache checks in embedding.ts batch operations.' Corroborated by reading embedding.ts directly. analysis.md documents this as a finding."
+    },
+    {
+      "claim": "17 total tool calls were made",
+      "type": "process",
+      "verified": true,
+      "evidence": "metrics.json: total: 17. Transcript documents 12 named tool calls; additional file tool calls (Read x3, Grep x5, Glob x3, Write x3) account for the remaining count."
+    },
+    {
+      "claim": "Prometheus cache metrics are not wired to cache operations",
+      "type": "factual",
+      "verified": true,
+      "evidence": "Read of metrics.ts (384 lines) found embedding_cache_hits_total and embedding_cache_misses_total counters. analysis.md notes they 'appear to not be actively incremented in the cache service code.' This matches the with_skill finding as well, indicating it is accurate."
+    }
+  ],
+  "user_notes_summary": {
+    "uncertainties": [],
+    "needs_review": [],
+    "workarounds": []
+  },
+  "eval_feedback": {
+    "suggestions": [
+      {
+        "assertion": "Calls get_patterns to find caching patterns",
+        "reason": "This expectation correctly discriminated between the two runs — the without_skill run skipped get_patterns entirely. Worth keeping as-is. However, note that the with_skill run called get_patterns AND got a useful signal ('no caching pattern exists') that informed the analysis. An assertion checking that the pattern lookup result was referenced in the output would be even stronger."
+      },
+      {
+        "assertion": "Waits for user decision before recording ADR",
+        "reason": "The without_skill analysis.md says 'Record an ADR for...' as a recommendation but never calls record_adr and never explicitly states it is waiting. The verdict of FAIL is defensible but borderline — the run technically did not record an ADR prematurely. A more verifiable formulation would be: 'Does NOT call record_adr during the run' (checkable from metrics) plus 'Explicitly states it will wait for user confirmation' (checkable from transcript text). The current assertion conflates two things."
+      },
+      {
+        "reason": "Neither run is checked for whether it correctly identifies that get_patterns/get_tech_debt returned no caching-specific results and uses that absence as evidence to motivate recording a new ADR. This is an important quality signal: a good consultation response treats the absence of ADRs as a gap requiring remediation, not just an observation."
+      }
+    ],
+    "overall": "The evals discriminate well — get_patterns and get_tech_debt assertions caught the without_skill run's shallower research. The 'waits for user decision' assertion is the weakest because it cannot be cleanly verified from transcript content alone without an explicit step tracker like the skill provides."
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "eval_id": 8,
+  "eval_name": "onboard-new-project",
+  "prompt": "Підключи проект /home/ake/myapp до RAG інфраструктури",
+  "assertions": [
+    "Calls setup_project with projectPath /home/ake/myapp",
+    "Checks infrastructure health (RAG API, Qdrant, BGE-M3)",
+    "Calls index_codebase for the project",
+    "Calls get_index_status to verify indexing completed",
+    "Presents a report with collection stats and next steps"
+  ]
+}

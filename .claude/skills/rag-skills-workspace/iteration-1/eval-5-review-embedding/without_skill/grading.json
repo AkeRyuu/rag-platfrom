@@ -1,0 +1,122 @@
+{
+  "expectations": [
+    {
+      "text": "Reads the file before reviewing",
+      "passed": true,
+      "evidence": "Transcript Call 1: 'Read - rag-api/src/services/embedding.ts (full file, 352 lines) — Result: Successfully read the entire embedding service file.' This was done in the very first parallel call."
+    },
+    {
+      "text": "Calls get_patterns and get_adrs to load review criteria",
+      "passed": false,
+      "evidence": "The without_skill run never called get_patterns or get_adrs directly. It called context_briefing (Call 1), which returned '5 patterns, 3 ADRs' as part of a bundled response. context_briefing is a composite meta-tool, not a direct invocation of get_patterns or get_adrs. The expectation specifically names these two tools, and neither appears in the transcript. metrics.json lists 'mcp__rag__context_briefing': 1 but no entries for get_patterns or get_adrs."
+    },
+    {
+      "text": "Calls review_code with the file content",
+      "passed": true,
+      "evidence": "Transcript Call 4: 'mcp__rag__review_code — Full code submitted for automated review — Result: Timed out (120000ms exceeded).' The tool was invoked with the file content. metrics.json confirms 'mcp__rag__review_code': 1 and notes timeout. Same situation as with_skill — the call was made correctly; the timeout is a service-side failure."
+    },
+    {
+      "text": "Calls check_architecture to validate against patterns",
+      "passed": false,
+      "evidence": "check_architecture does not appear anywhere in the transcript. metrics.json lists tools used: Read, Grep, Glob, Write, mcp__rag__context_briefing, mcp__rag__review_code, Bash — check_architecture is absent. The without_skill run performed architecture validation through direct analysis of patterns returned by context_briefing, not through the check_architecture tool call."
+    },
+    {
+      "text": "Presents findings with severity levels (critical/warning/info)",
+      "passed": true,
+      "evidence": "review.md uses explicit section headers: '### CRITICAL' (2 issues: no HTTP timeouts, no input validation), '### HIGH' (3 issues), '### MEDIUM' (5 issues), '### LOW' (5 issues). The severity scheme is different (Critical/High/Medium/Low rather than Critical/Warning/Info) but severity levels are clearly present. metrics.json confirms critical=2, high=3, medium=5, low=5."
+    },
+    {
+      "text": "Suggests tests via suggest_tests",
+      "passed": false,
+      "evidence": "suggest_tests does not appear in the transcript. metrics.json lists all tools used and suggest_tests is absent. The without_skill run did include a 'Test Coverage Assessment' section in review.md (drawn from reading embedding.test.ts directly), but this was from manual analysis, not from the suggest_tests RAG tool. The expectation specifically requires calling the suggest_tests tool."
+    }
+  ],
+  "summary": {
+    "passed": 3,
+    "failed": 3,
+    "total": 6,
+    "pass_rate": 0.5
+  },
+  "execution_metrics": {
+    "tool_calls": {
+      "Read": 4,
+      "Grep": 7,
+      "Glob": 1,
+      "Write": 3,
+      "mcp__rag__context_briefing": 1,
+      "mcp__rag__review_code": 1,
+      "Bash": 1
+    },
+    "total_tool_calls": 20,
+    "total_steps": 8,
+    "errors_encountered": 2,
+    "output_chars": null,
+    "transcript_chars": null
+  },
+  "timing": {
+    "executor_duration_seconds": 314.6,
+    "grader_duration_seconds": null,
+    "total_duration_seconds": 314.6
+  },
+  "claims": [
+    {
+      "claim": "15 issues were identified total (2 critical, 3 high, 5 medium, 5 low)",
+      "type": "factual",
+      "verified": true,
+      "evidence": "review.md contains exactly 15 numbered issues across 4 severity tiers. metrics.json confirms critical=2, high=3, medium=5, low=5."
+    },
+    {
+      "claim": "No HTTP timeouts and no input validation are the top two critical issues",
+      "type": "quality",
+      "verified": true,
+      "evidence": "review.md CRITICAL section: Issue 1 = 'No HTTP Request Timeouts (Lines 189, 202, 230, 280, 316, 329-341)' and Issue 2 = 'No Input Validation on text Parameter (Lines 47, 70, 165, 215, 228, 314, 327)'. Both include concrete line references and production impact analysis."
+    },
+    {
+      "claim": "context_briefing was used as a substitute for get_patterns and get_adrs",
+      "type": "process",
+      "verified": true,
+      "evidence": "Transcript Call 1: 'mcp__rag__context_briefing — Result: Returned 5 memories, 5 patterns, 3 ADRs. Impact: MEDIUM. Key context: singleton service pattern, BGE-M3 as primary embedding model ADR, Zod validation pattern.' The patterns and ADRs were obtained via the meta-tool rather than individually."
+    },
+    {
+      "claim": "embedWithDetails is dead code — not called anywhere in the codebase",
+      "type": "factual",
+      "verified": true,
+      "evidence": "Transcript Call 8: 'Grep for embedWithDetails across codebase — Result: Only defined in embedding.ts. Not called anywhere else.' review.md Issue 11 confirms: 'A grep for embedWithDetails across the entire codebase only finds its definition.'"
+    },
+    {
+      "claim": "The review produced more and better-classified findings than the with_skill run",
+      "type": "quality",
+      "verified": true,
+      "evidence": "without_skill: 15 issues with Critical/High/Medium/Low classification. with_skill: 8 issues with Warning/Info only, no Critical designation. The without_skill run correctly elevated HTTP timeout and input validation to Critical (production availability risks), whereas with_skill labeled them Warning. without_skill also identified 7 additional issues (retry logic, sequential non-BGE batch, empty array handling, tokens field, JSDoc)."
+    }
+  ],
+  "user_notes_summary": {
+    "uncertainties": [],
+    "needs_review": [],
+    "workarounds": [
+      "review_code timed out — manual analysis substituted",
+      "Bash mkdir was denied — output directory must have pre-existed",
+      "context_briefing used instead of individual get_patterns and get_adrs calls"
+    ]
+  },
+  "eval_feedback": {
+    "suggestions": [
+      {
+        "assertion": "Calls get_patterns and get_adrs to load review criteria",
+        "reason": "This expectation fails for without_skill, but without_skill produced a higher-quality review. context_briefing returns both patterns and ADRs in one call and is the recommended approach per CLAUDE.md ('REQUIRED before code changes'). The assertion penalizes an equally valid or superior workflow. Consider replacing with 'Loads patterns and ADRs (via get_patterns, get_adrs, or context_briefing)' to test intent rather than specific tool choice."
+      },
+      {
+        "assertion": "Calls check_architecture to validate against patterns",
+        "reason": "The without_skill run did not call check_architecture and still produced a better review. check_architecture is useful but the expectation treats it as mandatory when the outcome (architecture validation) is what matters. Consider changing to 'The review verifies pattern compliance and references at least one pattern from the project (e.g., singleton service, BGE-M3 ADR)' — which is testable from the output."
+      },
+      {
+        "assertion": "Suggests tests via suggest_tests",
+        "reason": "without_skill skipped suggest_tests but still produced a thorough test coverage section with 6 specific gaps identified. The expectation tests tool invocation rather than outcome. A better assertion: 'The review includes specific missing test scenarios for the file.' This would pass for both runs and actually measure meaningful output."
+      },
+      {
+        "reason": "No assertion checks the quality or completeness of the issues found. The without_skill run found 15 issues (including 2 Critical) vs 8 in with_skill (0 Critical). An assertion like 'The review identifies the HTTP timeout absence and input validation gap as high-severity issues' would discriminate between shallow and thorough reviews and would be verifiable from the output."
+      }
+    ],
+    "overall": "Three of six expectations test specific tool invocations rather than outcomes. This causes the without_skill run — which produced a more thorough review with better severity calibration and 7 additional issues — to score 50% while with_skill scores 100% despite a shallower result. The evals should be reoriented toward verifiable output quality: were critical issues identified, were severities appropriate, were actionable recommendations provided."
+  }
+}

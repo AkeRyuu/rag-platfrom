@@ -1,0 +1,115 @@
+{
+  "expectations": [
+    {
+      "text": "Calls start_session with a descriptive sessionId",
+      "passed": true,
+      "evidence": "Tool Call 1 in transcript calls start_session with sessionId: '2026-02-26-optimize-vector-store-search' — includes date and task description, clearly descriptive."
+    },
+    {
+      "text": "Calls get_developer_profile",
+      "passed": true,
+      "evidence": "Tool Call 2 in transcript and metrics.json both confirm mcp__rag__get_developer_profile was called. Result: 6 sessions, 152 tool calls, top tools and peak hours returned."
+    },
+    {
+      "text": "Calls context_briefing with task mentioning vector-store.ts optimization and files including vector-store.ts",
+      "passed": true,
+      "evidence": "Tool Call 3: context_briefing with task='Оптимізація пошуку в vector-store.ts — покращення швидкості та якості пошукових запитів' and files=['rag-api/src/services/vector-store.ts']. Both task and file match the expectation."
+    },
+    {
+      "text": "Calls warm_cache with the sessionId",
+      "passed": true,
+      "evidence": "Tool Call 4: warm_cache called with sessionId='2026-02-26-optimize-vector-store-search' matching the session started in Tool Call 1. metrics.json also confirms warm_cache was called."
+    },
+    {
+      "text": "Presents a structured briefing with sections for previous context, relevant code, patterns, and dependencies",
+      "passed": true,
+      "evidence": "The Summary section covers: previous context (5 memories from context_briefing including Sprint 1 decisions), relevant code (file read in Steps 5-6: 1315 lines, 40 methods), patterns (5 patterns from context_briefing), and ADRs/dependencies (3 ADRs + connected services from graph). While not using those exact section headers, all four content areas are present and clearly organized."
+    },
+    {
+      "text": "Runs start_session and get_developer_profile in parallel",
+      "passed": true,
+      "evidence": "metrics.json parallelBatches[0]: batch 1 lists ['start_session', 'get_developer_profile'] with description 'Step 1: Initialize session + load developer profile'. Transcript Step 1 is titled 'Start Session + Developer Profile (parallel)' and shows both calls under the same step."
+    },
+    {
+      "text": "Runs context_briefing and warm_cache in parallel after session starts",
+      "passed": true,
+      "evidence": "metrics.json parallelBatches[1]: batch 2 lists ['context_briefing', 'warm_cache'] with description 'Step 2: Load full context + warm embedding cache'. Transcript Step 2 is titled 'Context Briefing + Cache Warming (parallel)'."
+    }
+  ],
+  "summary": {
+    "passed": 7,
+    "failed": 0,
+    "total": 7,
+    "pass_rate": 1.0
+  },
+  "execution_metrics": {
+    "tool_calls": {
+      "mcp__rag__start_session": 1,
+      "mcp__rag__get_developer_profile": 1,
+      "mcp__rag__context_briefing": 1,
+      "mcp__rag__warm_cache": 1,
+      "Read": 2
+    },
+    "total_tool_calls": 6,
+    "total_steps": 3,
+    "errors_encountered": 0,
+    "output_chars": 2150,
+    "transcript_chars": 2000
+  },
+  "timing": {
+    "executor_duration_seconds": 164.4,
+    "total_duration_seconds": 164.4
+  },
+  "claims": [
+    {
+      "claim": "start_session and get_developer_profile were run in parallel (batch 1)",
+      "type": "process",
+      "verified": true,
+      "evidence": "metrics.json parallelBatches[0] explicitly lists both tools in batch 1. Transcript Step 1 header also says '(parallel)'."
+    },
+    {
+      "claim": "context_briefing and warm_cache were run in parallel (batch 2)",
+      "type": "process",
+      "verified": true,
+      "evidence": "metrics.json parallelBatches[1] lists both tools in batch 2. Transcript Step 2 header also says '(parallel)'."
+    },
+    {
+      "claim": "Session auto-resumed from previous session 1c3dd7c8-7d71-4559-84cb-7f754fc1df25",
+      "type": "factual",
+      "verified": true,
+      "evidence": "Both transcript and metrics.json confirm resumedFrom: '1c3dd7c8-7d71-4559-84cb-7f754fc1df25'."
+    },
+    {
+      "claim": "vector-store.ts has 1315 lines and ~40 methods",
+      "type": "factual",
+      "verified": true,
+      "evidence": "metrics.json fileAnalyzed.lines=1315, methods=40. Transcript Step 3 tool call 6 describes the full class with a list of 40+ methods."
+    },
+    {
+      "claim": "Cache warmed with 3 queries",
+      "type": "factual",
+      "verified": true,
+      "evidence": "Transcript Tool Call 4 result: 'Cache warmed, 3 queries pre-loaded.' metrics.json cacheQueriesWarmed=3."
+    }
+  ],
+  "user_notes_summary": {
+    "uncertainties": [],
+    "needs_review": [],
+    "workarounds": []
+  },
+  "eval_feedback": {
+    "suggestions": [
+      {
+        "assertion": "Runs start_session and get_developer_profile in parallel",
+        "reason": "The parallel execution claim is verified from the transcript and metrics.json, but both are produced by the executor itself. A more robust check would measure actual wall-clock concurrency or verify both tool calls appear in the same assistant message turn. As written, an executor that logs 'parallel' in its self-reported metrics without actually parallelizing would also pass."
+      },
+      {
+        "reason": "No assertion checks whether the structured briefing content is actually useful or grounded — for example, that the memory items retrieved are genuinely relevant to vector-store search optimization, not generic boilerplate. The current 'structured briefing' assertion passes if sections exist but says nothing about their quality or relevance."
+      },
+      {
+        "reason": "No assertion checks the warm_cache recentQueries parameter — a skill that passes an empty or generic query list would still satisfy expectation 4 ('Calls warm_cache with the sessionId'). Consider requiring task-relevant queries."
+      }
+    ],
+    "overall": "All assertions are satisfied with clear evidence. The evals cover the key behaviors of the skill well, but the parallelism assertions rely on self-reported metadata rather than observable concurrency, and the briefing quality assertion could be tightened."
+  }
+}

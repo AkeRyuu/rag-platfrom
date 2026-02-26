@@ -1,0 +1,12 @@
+{
+  "eval_id": 7,
+  "eval_name": "debug-recall-empty",
+  "prompt": "recall повертає порожній масив навіть коли є memories в колекції. Помилок в логах немає.",
+  "assertions": [
+    "Calls context_briefing with debug task description",
+    "Uses search_graph or find_symbol to trace the recall implementation",
+    "Reads relevant source files to understand the recall flow",
+    "Checks for known issues via recall about similar bugs",
+    "Presents a structured debug report with root cause hypothesis and fix suggestion"
+  ]
+}

@@ -1,0 +1,114 @@
+{
+  "expectations": [
+    {
+      "text": "Calls setup_project with projectPath /home/ake/myapp",
+      "passed": true,
+      "evidence": "Tool call 8: 'mcp__rag__setup_project: Attempt to setup myapp - Call: setup_project(projectPath=\"/home/ake/myapp\", projectName=\"myapp\") - Result: Error: ENOENT: no such file or directory'. The call was made with the correct projectPath. It failed due to the missing directory, which is the same expected error as in the with_skill run."
+    },
+    {
+      "text": "Checks infrastructure health (RAG API, Qdrant, BGE-M3)",
+      "passed": false,
+      "evidence": "No health checks were performed for any of the three infrastructure services (RAG API :3100, Qdrant :6333, BGE-M3 :8080). The without_skill run checked get_project_stats and get_index_status, which return data from the API but are not health checks. No curl or equivalent health endpoint calls appear anywhere in the transcript or tool call list. metrics.json does not include an 'infrastructure_health' field (unlike with_skill metrics.json which does)."
+    },
+    {
+      "text": "Calls index_codebase for the project",
+      "passed": false,
+      "evidence": "index_codebase was never called. The transcript's tool call list (steps 1-12) does not include index_codebase. The without_skill run identified index_codebase as a step in its onboarding plan (Step 4) but did not actually execute it. metrics.json tool breakdown shows no 'index_codebase' entry. The run produced a plan rather than executing the onboarding."
+    },
+    {
+      "text": "Calls get_index_status to verify indexing completed",
+      "passed": true,
+      "evidence": "Tool call 11: 'mcp__rag__get_index_status: Check current index - Call: get_index_status() - Result: Status idle, 0 indexed files, 1024 vectors, never fully indexed'. The tool was called. However, it was called to check the current rag project state, not to verify that myapp indexing completed (since index_codebase was never called for myapp)."
+    },
+    {
+      "text": "Presents a report with collection stats and next steps",
+      "passed": false,
+      "evidence": "The transcript presents an 'Onboarding Plan' with detailed next steps (Steps 1-6 including mkdir, setup_project, restart, index_codebase, verify, record patterns). However, there are no actual collection stats for myapp — only a table of collections that 'will be created' in the future. The summary table at the end shows 'onboarding_steps_identified' in metrics.json rather than actual indexed stats. The expectation says 'collection stats', which implies actual data from a completed indexing, not a prospective list. Since index_codebase was never run, no real stats exist to report."
+    }
+  ],
+  "summary": {
+    "passed": 2,
+    "failed": 3,
+    "total": 5,
+    "pass_rate": 0.4
+  },
+  "execution_metrics": {
+    "tool_calls": {
+      "Glob": 2,
+      "Read": 3,
+      "Grep": 2,
+      "mcp__rag__search_codebase": 1,
+      "mcp__rag__setup_project": 1,
+      "mcp__rag__get_project_stats": 1,
+      "mcp__rag__list_aliases": 1,
+      "mcp__rag__get_index_status": 1
+    },
+    "total_tool_calls": 12,
+    "total_steps": 12,
+    "errors_encountered": 1,
+    "output_chars": null,
+    "transcript_chars": 9840
+  },
+  "timing": {
+    "executor_duration_seconds": 170.1,
+    "grader_duration_seconds": null,
+    "total_duration_seconds": 170.1
+  },
+  "claims": [
+    {
+      "claim": "The setup_project MCP tool automates 80% of onboarding",
+      "type": "quality",
+      "verified": false,
+      "evidence": "This is a statement made in the 'Key Findings' section. It is a reasonable characterization based on reading the tool's source code (suggestions.ts), but the '80%' figure is an unverifiable estimate, not a measured fact. Partially supported by reading the handler implementation in step 7."
+    },
+    {
+      "claim": "The MCP server name follows the pattern {projectName}-rag",
+      "type": "factual",
+      "verified": true,
+      "evidence": "The generated .mcp.json sample in the plan uses 'myapp-rag' as the server name, and the existing .mcp.json (read in step 12) uses 'rag' as the server name (not 'rag-rag'), so the pattern is inferred from the tool implementation read in step 7."
+    },
+    {
+      "claim": "index_codebase will create 11 Qdrant collections for myapp",
+      "type": "factual",
+      "verified": false,
+      "evidence": "The collections table lists 11 myapp_* collections. This was not verified by actually running index_codebase. The list is taken from MEMORY.md context. Whether all 11 are actually created by the indexer was not confirmed against the codebase."
+    },
+    {
+      "claim": "The consumer project uses npx -y @crowley/rag-mcp@latest to run the MCP server",
+      "type": "factual",
+      "verified": true,
+      "evidence": "Step 12 reads the actual /home/ake/shared-ai-infra/.mcp.json and finds 'command: npx, args: [-y, @crowley/rag-mcp@latest]'. The claim is directly supported by an actual file read."
+    },
+    {
+      "claim": "Status completed_with_plan (from metrics.json)",
+      "type": "process",
+      "verified": true,
+      "evidence": "metrics.json 'status: completed_with_plan' accurately reflects that the run produced a plan document rather than completing actual onboarding. The without_skill agent treated this as a documentation/planning task rather than an execution task."
+    }
+  ],
+  "user_notes_summary": {
+    "uncertainties": [],
+    "needs_review": [
+      "The without_skill run interpreted the task as 'document how to onboard' rather than 'actually execute onboarding steps'. This is a fundamental approach difference from the with_skill run."
+    ],
+    "workarounds": [
+      "Because the directory did not exist, the without_skill agent fell back to a planning/documentation mode rather than attempting to execute each onboarding step."
+    ]
+  },
+  "eval_feedback": {
+    "suggestions": [
+      {
+        "assertion": "Calls get_index_status to verify indexing completed",
+        "reason": "This assertion passed even though index_codebase was never called and the get_index_status call was checking the rag project's state, not verifying myapp indexing. The assertion should be strengthened to require that get_index_status follows a call to index_codebase, or that it returns data specifically associated with the myapp project."
+      },
+      {
+        "assertion": "Presents a report with collection stats and next steps",
+        "reason": "The assertion failed here because no actual collection stats exist (index_codebase was never called). However, the with_skill run also presents only prospective/expected collections rather than real indexed stats. The assertion wording 'collection stats' is ambiguous — if it means 'a table of collections', both runs satisfy it; if it means 'stats from a real indexed collection', neither run fully satisfies it. Clarifying the expectation would make it more discriminating."
+      },
+      {
+        "reason": "The most important behavioral difference between the two runs — the with_skill agent executed the onboarding steps while the without_skill agent only planned them — is not directly captured by any single expectation. An assertion like 'Actually invokes index_codebase (not just mentions it in a plan)' would cleanly separate the two behaviors."
+      }
+    ],
+    "overall": "The eval successfully discriminates between the two runs on 3 of 5 expectations. The infrastructure health check and index_codebase execution expectations are genuinely strong discriminators. The get_index_status and collection stats expectations are weaker because they can be satisfied superficially (calling get_index_status at any point, listing expected collections in a plan)."
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "eval_id": 2,
+  "eval_name": "implement-rate-limit",
+  "prompt": "Реалізуй rate limiting middleware для RAG API — максимум 100 запитів на хвилину на IP",
+  "assertions": [
+    "Calls context_briefing before any code changes",
+    "Calls suggest_implementation or get_patterns to understand existing middleware patterns",
+    "Presents an implementation plan and waits for confirmation before coding",
+    "After implementation, calls review_code or check_architecture to validate",
+    "Calls remember to save the decision about rate limiting approach",
+    "Plan includes blast radius analysis (what depends on the changed files)"
+  ]
+}

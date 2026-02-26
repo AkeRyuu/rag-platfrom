@@ -1,0 +1,12 @@
+{
+  "eval_id": 4,
+  "eval_name": "research-memory-governance",
+  "prompt": "Як працює система memory governance? Де знаходиться логіка quarantine та promotion?",
+  "assertions": [
+    "Uses hybrid_search or find_feature to locate memory governance code",
+    "Uses find_symbol to look up specific functions like promote or quarantine",
+    "Uses search_graph to trace dependencies between memory-related files",
+    "Presents findings with file:line references",
+    "Explains the flow from auto-memory to quarantine to promotion"
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "eval_id": 1,
+  "eval_name": "session-start",
+  "prompt": "Починаю працювати над оптимізацією пошуку в vector-store.ts, запусти сесію",
+  "assertions": [
+    "Calls start_session with a descriptive sessionId",
+    "Calls get_developer_profile",
+    "Calls context_briefing with task mentioning vector-store.ts optimization and files including vector-store.ts",
+    "Calls warm_cache with the sessionId",
+    "Presents a structured briefing with sections for previous context, relevant code, patterns, and dependencies",
+    "Runs start_session and get_developer_profile in parallel",
+    "Runs context_briefing and warm_cache in parallel after session starts"
+  ]
+}

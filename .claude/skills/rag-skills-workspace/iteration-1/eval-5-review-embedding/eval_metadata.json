@@ -1,0 +1,13 @@
+{
+  "eval_id": 5,
+  "eval_name": "review-embedding",
+  "prompt": "Зроби рев'ю коду в rag-api/src/services/embedding.ts",
+  "assertions": [
+    "Reads the file before reviewing",
+    "Calls get_patterns and get_adrs to load review criteria",
+    "Calls review_code with the file content",
+    "Calls check_architecture to validate against patterns",
+    "Presents findings with severity levels (critical/warning/info)",
+    "Suggests tests via suggest_tests"
+  ]
+}

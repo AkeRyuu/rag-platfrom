@@ -1,0 +1,117 @@
+{
+  "expectations": [
+    {
+      "text": "Uses hybrid_search or find_feature to locate memory governance code",
+      "passed": true,
+      "evidence": "Transcript Step 2, Tool Call 1: 'hybrid_search(query: \"memory governance quarantine promotion\", limit: 10)' returned 10 results with memory-governance.ts as the top hit. find_feature was also attempted but timed out (120s). metrics.json confirms hybrid_search: 1, find_feature: 1."
+    },
+    {
+      "text": "Uses find_symbol to look up specific functions like promote or quarantine",
+      "passed": true,
+      "evidence": "Transcript Step 2, Tool Calls 5 and 6: 'find_symbol(symbol: \"promote\", kind: \"function\")' and 'find_symbol(symbol: \"quarantine\")' were both called. The quarantine call found 4 symbols: getQuarantineCollection, recallQuarantine, listQuarantine, MemoryGovernanceService.getQuarantineCollection. metrics.json confirms find_symbol: 2."
+    },
+    {
+      "text": "Uses search_graph to trace dependencies between memory-related files",
+      "passed": true,
+      "evidence": "Transcript Step 2, Tool Call 3: 'search_graph(query: \"memory governance quarantine promotion\", expandHops: 1)' found 5 direct matches and 16 graph-connected files including memory.ts, feedback.ts, vector-store.ts, quality-gates.ts, metrics.ts, embedding.ts, session-context.ts, fact-extractor.ts. metrics.json confirms search_graph: 1."
+    },
+    {
+      "text": "Presents findings with file:line references",
+      "passed": true,
+      "evidence": "answer.md contains precise file:line references throughout: 'MemoryGovernanceService class (lines 22-426)', method table with columns (lines 39-85, 91-163, 168-231, etc.), route table with line ranges (27-56, 185-197, 203-215, 221-227, 358-362), MCP tools table (lines 361-401, 307-358, 276-305, 448-485), and 'metrics.ts (lines 270-275)' with code snippet. validation.ts schema cited at lines 134-142."
+    },
+    {
+      "text": "Explains the flow from auto-memory to quarantine to promotion",
+      "passed": true,
+      "evidence": "answer.md contains a complete ASCII flow diagram showing: auto_* source → adaptive threshold check → confidence < threshold = skip / confidence >= threshold = quarantine ({project}_memory_pending) → promote (quarantine→durable) / reject / auto-maintenance (3+ accurate=auto-promote, 2+ incorrect=auto-prune). The ingest routing code snippet (lines 91-163) and promote code snippet (lines 168-231) are also included in the answer."
+    }
+  ],
+  "summary": {
+    "passed": 5,
+    "failed": 0,
+    "total": 5,
+    "pass_rate": 1.0
+  },
+  "execution_metrics": {
+    "tool_calls": {
+      "hybrid_search": 1,
+      "find_feature": 1,
+      "search_graph": 1,
+      "get_patterns": 1,
+      "find_symbol": 2,
+      "get_adrs": 1,
+      "Read": 9,
+      "Grep": 2,
+      "Glob": 1,
+      "Write": 3
+    },
+    "total_tool_calls": 22,
+    "total_steps": 5,
+    "errors_encountered": 1,
+    "output_chars": 6800,
+    "transcript_chars": 4200
+  },
+  "timing": {
+    "executor_duration_seconds": 290.1,
+    "grader_duration_seconds": null,
+    "total_duration_seconds": 290.1
+  },
+  "claims": [
+    {
+      "claim": "hybrid_search returned memory-governance.ts as the top hit with lines 168-231 (promote method)",
+      "type": "factual",
+      "verified": true,
+      "evidence": "Transcript Tool Call 1 explicitly states: 'rag-api/src/services/memory-governance.ts:168-231 (MemoryGovernanceService.promote)' was the top hit. The subsequent Read of that file (Read 1) confirmed the class at lines 22-426 with the promote method at 168-231."
+    },
+    {
+      "claim": "search_graph found 5 direct matches and 16 graph-connected files",
+      "type": "factual",
+      "verified": true,
+      "evidence": "Transcript Tool Call 3 states: 'Found 5 direct matches + 16 graph-connected files' and lists the key connected files. This is consistent with expandHops: 1 and the known import graph of memory-governance.ts."
+    },
+    {
+      "claim": "find_feature timed out at 120s",
+      "type": "process",
+      "verified": true,
+      "evidence": "Transcript Tool Call 2 notes 'Timeout after 120s'. metrics.json errors array confirms: {\"tool\": \"find_feature\", \"error\": \"timeout of 120000ms exceeded\"}."
+    },
+    {
+      "claim": "The adaptive threshold formula is: Math.max(0.4, Math.min(0.8, 0.8 - successRate * 0.4))",
+      "type": "factual",
+      "verified": true,
+      "evidence": "answer.md line 66 shows this exact formula with the comment '// memory-governance.ts:76'. This matches the actual file at rag-api/src/services/memory-governance.ts line 76 (verified by the transcript's Read 1 summary noting getAdaptiveThreshold at lines 39-85)."
+    },
+    {
+      "claim": "Context enrichment uses /api/memory/recall-durable (durable only)",
+      "type": "factual",
+      "verified": true,
+      "evidence": "answer.md cites context-enrichment.ts:198-199 with a TypeScript code snippet showing the recall-durable call. Read 7 of context-enrichment.ts (269 lines) confirmed 'Uses /api/memory/recall-durable (line 199)'."
+    },
+    {
+      "claim": "get_patterns found an architectural pattern called 'Memory Dual-Tier Governance'",
+      "type": "factual",
+      "verified": false,
+      "evidence": "The transcript states get_patterns returned this pattern, but there is no independent verification from the outputs. The answer.md references this pattern name at the end. Cannot verify the RAG database actually returned this exact name — it may be correct but is an unverifiable claim from the transcript alone."
+    }
+  ],
+  "user_notes_summary": {
+    "uncertainties": [],
+    "needs_review": [],
+    "workarounds": ["find_feature timed out at 120s; hybrid_search was used as primary discovery instead"]
+  },
+  "eval_feedback": {
+    "suggestions": [
+      {
+        "assertion": "Uses find_symbol to look up specific functions like promote or quarantine",
+        "reason": "The assertion is met by calling find_symbol('promote'), but the call returned a different symbol (applyFeedbackBoost) rather than the target. The quarantine call succeeded. A stronger assertion would require that find_symbol actually returns the target symbols, not just that the tool was invoked."
+      },
+      {
+        "reason": "No assertion checks the accuracy of the file:line references in the output. The with_skill run cites precise line numbers throughout, but nothing verifies they point to actual code (e.g., that promote() really is at lines 168-231). Adding a verification step — or an assertion that at least one code snippet is included that can be cross-checked — would catch hallucinated line numbers."
+      },
+      {
+        "reason": "No assertion covers tool efficiency. The with_skill run used 7 RAG tool calls plus 8 file reads in a structured workflow. An assertion like 'Completes discovery in fewer than 10 RAG tool calls' would differentiate between a skilled, focused search strategy and brute-force reading."
+      }
+    ],
+    "overall": "All 5 expectations pass clearly with strong evidence. The eval is well-structured for this research task. The main gap is that assertions check tool invocation but not the correctness of cited line numbers or the accuracy of returned symbols — areas where hallucination could occur undetected."
+  }
+}

@@ -1,0 +1,107 @@
+{
+  "expectations": [
+    {
+      "text": "Calls setup_project with projectPath /home/ake/myapp",
+      "passed": true,
+      "evidence": "Tool call table row 2 and Step 1 section: 'Tool call: setup_project - projectPath: /home/ake/myapp, projectName: myapp, ragApiUrl: http://localhost:3100, updateClaudeMd: true'. The call was made; it failed with ENOENT because the directory does not exist, but the call itself was correctly executed with the right projectPath."
+    },
+    {
+      "text": "Checks infrastructure health (RAG API, Qdrant, BGE-M3)",
+      "passed": true,
+      "evidence": "Step 2 performs three explicit curl health checks: 'curl -s --connect-timeout 3 localhost:3100/health' (RAG API, result OK), 'curl -s --connect-timeout 3 localhost:6333/healthz' (Qdrant, result 'healthz check passed'), 'curl -s --connect-timeout 3 localhost:8080/health' (BGE-M3, result {model: BAAI/bge-m3, status: ok}). All three services confirmed healthy."
+    },
+    {
+      "text": "Calls index_codebase for the project",
+      "passed": true,
+      "evidence": "Step 3 and tool call row 6: 'Tool call: index_codebase - path: /home/ake/myapp, force: false'. Result was 0 files indexed (because the directory does not exist), but the tool was called with the correct project path."
+    },
+    {
+      "text": "Calls get_index_status to verify indexing completed",
+      "passed": true,
+      "evidence": "Step 4a and tool call row 7: 'get_index_status' was called and returned 'Status: idle, Total Files: 0, Indexed Files: N/A, Last Updated: Never, Vector Count: 1024'. The result correctly reflects that no myapp collections were populated."
+    },
+    {
+      "text": "Presents a report with collection stats and next steps",
+      "passed": true,
+      "evidence": "Step 6 is a full report titled 'Onboarding Status: myapp -- INCOMPLETE' that includes: (1) an Infrastructure Status table showing all 3 services healthy, (2) a 'What Was Attempted' table listing all 5 steps with tool names and statuses, (3) a 'Collections Expected' table listing 5 myapp_* collections with descriptions, and (4) a 'Next Steps' numbered list with 5 actionable items including mkdir, adding files, re-running onboarding, restarting Claude Code, and testing search."
+    }
+  ],
+  "summary": {
+    "passed": 5,
+    "failed": 0,
+    "total": 5,
+    "pass_rate": 1.0
+  },
+  "execution_metrics": {
+    "tool_calls": {
+      "Glob": 1,
+      "setup_project": 1,
+      "Bash_curl_health": 3,
+      "index_codebase": 1,
+      "get_index_status": 1,
+      "analyze_project_structure": 1,
+      "hybrid_search": 1,
+      "get_project_stats": 1,
+      "find_duplicates": 1
+    },
+    "total_tool_calls": 11,
+    "total_steps": 6,
+    "errors_encountered": 1,
+    "output_chars": null,
+    "transcript_chars": 7120
+  },
+  "timing": {
+    "executor_duration_seconds": 144.8,
+    "grader_duration_seconds": null,
+    "total_duration_seconds": 144.8
+  },
+  "claims": [
+    {
+      "claim": "All infrastructure services are healthy",
+      "type": "factual",
+      "verified": true,
+      "evidence": "Three curl health checks returned OK for RAG API (:3100), Qdrant (:6333), and BGE-M3 (:8080) with valid JSON responses and expected status fields."
+    },
+    {
+      "claim": "The indexer ran successfully but found 0 files because the directory does not exist",
+      "type": "factual",
+      "verified": true,
+      "evidence": "index_codebase result shows 'Total files found: 0, Files indexed: 0, Chunks created: 0, Errors: 0, Duration: 0ms'. The empty result is consistent with the directory not existing."
+    },
+    {
+      "claim": "get_index_status returned results for myapp",
+      "type": "factual",
+      "verified": false,
+      "evidence": "The get_index_status result header says 'Index Status: rag' not 'Index Status: myapp'. The MCP context is the rag project, so status reflects rag project state rather than a myapp-specific check. This is a limitation noted in the transcript."
+    },
+    {
+      "claim": "onboarding_complete: false",
+      "type": "factual",
+      "verified": true,
+      "evidence": "metrics.json field 'onboarding_complete: false' matches transcript conclusion that onboarding is INCOMPLETE due to missing directory."
+    }
+  ],
+  "user_notes_summary": {
+    "uncertainties": [],
+    "needs_review": [
+      "get_index_status returns rag project data, not myapp-specific data, because the MCP context is always scoped to the configured PROJECT_NAME"
+    ],
+    "workarounds": []
+  },
+  "eval_feedback": {
+    "suggestions": [
+      {
+        "assertion": "Calls get_index_status to verify indexing completed",
+        "reason": "This assertion passes even though get_index_status returned data for the 'rag' project rather than 'myapp' (the MCP server is scoped to the project it was configured for). The assertion does not verify that the status check was meaningful for the target project. Consider checking whether the result header or content references 'myapp'."
+      },
+      {
+        "assertion": "Presents a report with collection stats and next steps",
+        "reason": "The assertion passes but the 'collection stats' in the report are future/expected collections (since myapp doesn't exist yet), not actual indexed collection sizes. A discriminating assertion would distinguish between a report of what was actually indexed vs a plan of what will be indexed."
+      },
+      {
+        "reason": "No assertion checks graceful error handling when the target project directory does not exist. The skill correctly detected the ENOENT and continued rather than aborting, which is a meaningful quality signal not tested by any expectation."
+      }
+    ],
+    "overall": "All 5 expectations pass cleanly with strong evidence. The eval covers the happy-path tool sequence well, but the assertions are not sensitive to the edge case that the target directory was missing throughout — a run that called the right tools in the right order but produced garbage output would still pass."
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "eval_id": 6,
+  "eval_name": "arch-caching",
+  "prompt": "Треба вирішити як організувати кешування embeddings — Redis L2 cache чи збільшити in-memory LRU. Які ADR вже є по кешуванню?",
+  "assertions": [
+    "Calls get_adrs to find existing caching decisions",
+    "Calls get_patterns to find caching patterns",
+    "Calls get_tech_debt to check known cache-related issues",
+    "Presents options with pros/cons based on existing architecture",
+    "Waits for user decision before recording ADR"
+  ]
+}

@@ -1,0 +1,112 @@
+{
+  "expectations": [
+    {
+      "text": "Calls context_briefing before any code changes",
+      "passed": true,
+      "evidence": "Step 1 of the transcript calls mcp__rag__context_briefing in parallel with Read and Glob, before any Write operations. All Write calls appear in Step 6. metrics.json confirms mcp__rag__context_briefing: 1."
+    },
+    {
+      "text": "Calls suggest_implementation or get_patterns to understand existing middleware patterns",
+      "passed": false,
+      "evidence": "metrics.json shows rag_tools_used: [\"context_briefing\"] — only one RAG tool was used in the entire run. Neither mcp__rag__suggest_implementation nor mcp__rag__get_patterns appears anywhere in the transcript or metrics. The agent read auth.ts directly instead of querying for middleware patterns via RAG."
+    },
+    {
+      "text": "Presents an implementation plan and waits for confirmation before coding",
+      "passed": false,
+      "evidence": "The transcript shows Steps 1-5 (context gathering and file reading) immediately followed by Step 6 (Write all output files). No plan was presented to the user and no confirmation was requested. The 'Design Decisions' section appears in the transcript itself, written after implementation, not as a pre-implementation plan submitted for review."
+    },
+    {
+      "text": "After implementation, calls review_code or check_architecture to validate",
+      "passed": false,
+      "evidence": "metrics.json lists tool_calls: context_briefing, Read, Glob, Write only. There is no mcp__rag__review_code or mcp__rag__check_architecture call anywhere in the transcript or metrics. The agent moved directly from writing files to completing the task."
+    },
+    {
+      "text": "Calls remember to save the decision about rate limiting approach",
+      "passed": false,
+      "evidence": "metrics.json confirms rag_tools_used: [\"context_briefing\"] — mcp__rag__remember was never called. No memory was saved about the implementation decisions or rate limiting approach."
+    },
+    {
+      "text": "Plan includes blast radius analysis (what depends on the changed files)",
+      "passed": false,
+      "evidence": "No blast radius analysis was performed. The transcript contains no search_graph call targeting dependents of server.ts or config.ts, no run_quality_gates call, and no discussion of what other files or components depend on the files being changed. The 'Summary of Output Files' section lists target locations but never identifies downstream consumers."
+    }
+  ],
+  "summary": {
+    "passed": 1,
+    "failed": 5,
+    "total": 6,
+    "pass_rate": 0.17
+  },
+  "execution_metrics": {
+    "tool_calls": {
+      "mcp__rag__context_briefing": 1,
+      "Read": 7,
+      "Glob": 1,
+      "Write": 6,
+      "total": 15
+    },
+    "total_tool_calls": 15,
+    "rag_tool_calls": 1,
+    "non_rag_tool_calls": 14,
+    "output_chars": null,
+    "transcript_chars": 3247
+  },
+  "timing": {
+    "executor_duration_seconds": 257.1,
+    "grader_duration_seconds": null,
+    "total_duration_seconds": 257.1
+  },
+  "claims": [
+    {
+      "claim": "Follows existing middleware patterns (auth.ts style)",
+      "type": "quality",
+      "verified": true,
+      "evidence": "rate-limiter.ts uses the same (req, res, next) Express signature, imports config and logger, skips /health and /metrics paths — consistent with auth.ts pattern. The agent read auth.ts explicitly to inform the design."
+    },
+    {
+      "claim": "Middleware uses a sliding window algorithm",
+      "type": "factual",
+      "verified": true,
+      "evidence": "rate-limiter.ts lines 125-128: filters timestamps outside the current window on each request, implementing a genuine sliding window rather than a fixed counter."
+    },
+    {
+      "claim": "No new external dependencies added",
+      "type": "factual",
+      "verified": true,
+      "evidence": "rate-limiter.ts imports only from express (types), config, and logger — all existing project dependencies. package.json was read and confirmed no existing rate-limit packages."
+    },
+    {
+      "claim": "Output files go to correct locations",
+      "type": "process",
+      "verified": true,
+      "evidence": "transcript.md Summary table lists target locations: rag-api/src/middleware/rate-limiter.ts and rag-api/src/middleware/__tests__/rate-limiter.test.ts — consistent with existing project structure."
+    },
+    {
+      "claim": "config.ts patch makes RATE_LIMIT_MAX and RATE_LIMIT_WINDOW_MS optional (uses ? modifier)",
+      "type": "factual",
+      "verified": true,
+      "evidence": "without_skill config.ts.patch: interface fields declared as RATE_LIMIT_MAX?: number and RATE_LIMIT_WINDOW_MS?: number (optional). The with_skill patch makes them required (no ?). The without_skill approach is safer for backward compatibility but requires null-coalescing in middleware — which rate-limiter.ts does correctly with ?? operator."
+    }
+  ],
+  "user_notes_summary": {
+    "uncertainties": [],
+    "needs_review": [],
+    "workarounds": ["Permission denied on Bash mkdir — switched to Write tool directly for output directory"]
+  },
+  "eval_feedback": {
+    "suggestions": [
+      {
+        "assertion": "Presents an implementation plan and waits for confirmation before coding",
+        "reason": "Same issue as with_skill: this assertion cannot be genuinely satisfied in a non-interactive batch execution context. Neither run paused for user confirmation. Consider replacing this with 'Produces a documented plan section before the first Write call' — something that can be verified from the transcript alone."
+      },
+      {
+        "reason": "The without_skill run produced functionally equivalent output to with_skill (same sliding window algorithm, same design decisions, same file structure) in half the time (257s vs 563s). The evals should include assertions that check whether the RAG context actually changed the output — e.g., 'uses the project's existing RateLimitError class or explicitly documents why it was not used', which both runs satisfy, or 'identifies the pre-existing CRITICAL tech debt item', which only the with_skill run explicitly captured."
+      },
+      {
+        "assertion": "Calls suggest_implementation or get_patterns to understand existing middleware patterns",
+        "reason": "The without_skill run did find middleware patterns — by directly reading auth.ts, error-handler.ts, and async-handler.ts. The assertion tests tool invocation rather than whether patterns were actually understood. A stronger assertion would check the output for evidence that patterns were applied, not just that specific RAG tools were called."
+      }
+    ],
+    "overall": "5 of 6 expectations fail for without_skill, but the output quality is nearly identical to with_skill. This suggests the evals are testing process compliance (RAG tool usage) rather than output quality. Consider adding output-level assertions (e.g., 'rate-limit middleware compiles without errors', 'test file covers the 429 case') that would distinguish a genuinely better implementation."
+  }
+}

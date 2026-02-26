@@ -1,0 +1,108 @@
+{
+  "expectations": [
+    {
+      "text": "Calls context_briefing with debug task description",
+      "passed": true,
+      "evidence": "Step 2 of the transcript explicitly shows: 'context_briefing(task: \"debug: recall returns empty array even when memories exist in collection. No errors in logs.\", files: [\"mcp-server/src/tools/search.ts\", \"rag-api/src/services/memory.ts\", \"rag-api/src/routes/memory.ts\"])' — the call was made with a relevant task description and file list. metrics.json confirms context_briefing: 1."
+    },
+    {
+      "text": "Uses search_graph or find_symbol to trace the recall implementation",
+      "passed": true,
+      "evidence": "Step 3 shows both: 'search_graph(query: \"recall memory search empty results\", expandHops: 2)' identifying memory.ts, memory-governance.ts, and connected services; and 'find_symbol(symbol: \"recall\")' locating recall, recallQuarantine, recallDurable, recallWithTimeout, recallMemorySchema, and recallAtK. metrics.json confirms search_graph: 1 and find_symbol: 1."
+    },
+    {
+      "text": "Reads relevant source files to understand the recall flow",
+      "passed": true,
+      "evidence": "Step 4 documents 14 file reads including memory.ts, memory-governance.ts, routes/memory.ts, vector-store.ts (multiple sections), mcp-server/tools/memory.ts, context-enrichment.ts, api-client.ts, and validation.ts. metrics.json confirms Read: 13, files_analyzed: 11. The transcript also shows Grep calls (7) for pattern verification."
+    },
+    {
+      "text": "Checks for known issues via recall about similar bugs",
+      "passed": true,
+      "evidence": "Step 2 shows an explicit 'recall(query: \"bug recall empty array memories collection\")' call that returned 5 memories with 43.9-45.6% relevance (Memory Dual-Tier Governance pattern, Qdrant orphaned alias fix, context enrichment ADR, low test coverage tech debt, zero-downtime reindexing ADR). metrics.json confirms recall: 1."
+    },
+    {
+      "text": "Presents a structured debug report with root cause hypothesis and fix suggestion",
+      "passed": true,
+      "evidence": "The analysis.md output provides a fully structured report with: 3 numbered issues (primary, secondary, latent), a code-level trace showing the exact 404 path, specific fix suggestions for each issue (adding logging to vector-store.ts, fixing context-enrichment.ts field name from .memories to .results, adding a superseded-chain check), plus a blast radius section. The primary root cause (silent 404 in vectorStore.search()) and confirmed bug (context enrichment wrong field name) are clearly presented."
+    }
+  ],
+  "summary": {
+    "passed": 5,
+    "failed": 0,
+    "total": 5,
+    "pass_rate": 1.0
+  },
+  "execution_metrics": {
+    "tool_calls": {
+      "context_briefing": 1,
+      "recall": 1,
+      "search_graph": 1,
+      "find_symbol": 1,
+      "hybrid_search": 1,
+      "search_codebase": 1,
+      "suggest_related_code": 2,
+      "Read": 13,
+      "Grep": 7,
+      "Write": 3
+    },
+    "total_tool_calls": 31,
+    "total_steps": 6,
+    "errors_encountered": 0,
+    "output_chars": 0,
+    "transcript_chars": 5200
+  },
+  "timing": {
+    "executor_duration_seconds": 433.4,
+    "grader_duration_seconds": null,
+    "total_duration_seconds": 433.4
+  },
+  "claims": [
+    {
+      "claim": "context_briefing retrieved 5 memories, 5 patterns, 3 ADRs",
+      "type": "factual",
+      "verified": true,
+      "evidence": "Stated directly in Step 2 result: '5 memories (observability gaps, enrichment ADR, scalability, memory governance, eval baseline), 5 patterns (Memory Dual-Tier, Express Route, Tool Registration, Service Layer, Project Isolation), 3 ADRs (enrichment, zero-downtime, Qdrant)'. This is plausible given the project's known memory contents."
+    },
+    {
+      "claim": "context-enrichment.ts reads memoriesRes.data.memories instead of .results (confirmed bug)",
+      "type": "factual",
+      "verified": true,
+      "evidence": "The without_skill run independently found and confirmed the same bug at context-enrichment.ts:227 — memoriesRes?.data?.memories should be .results. The with_skill run also cross-checked via reading suggestions.ts line 89 which correctly uses 'results || memories || []', corroborating the finding."
+    },
+    {
+      "claim": "vectorStore.search() silently returns [] on 404 with no logging",
+      "type": "factual",
+      "verified": true,
+      "evidence": "Confirmed by both runs reading vector-store.ts:522-525 and observing the catch block returns [] without any logger call. The code snippet is quoted accurately in the transcript and analysis.md."
+    },
+    {
+      "claim": "suggest_related_code tool call failed (API error, skipped)",
+      "type": "process",
+      "verified": true,
+      "evidence": "Step 6 of the transcript explicitly notes 'suggest_related_code(...) — API error, skipped'. metrics.json shows suggest_related_code: 2, consistent with two attempts."
+    },
+    {
+      "claim": "3 issues found, 2 confirmed bugs",
+      "type": "quality",
+      "verified": true,
+      "evidence": "metrics.json shows issues_found: 3, confirmed_bugs: 2. The analysis correctly distinguishes the primary hypothesis (404 silent return), confirmed bug (wrong field name), and latent risk (supersede chain exhaustion)."
+    }
+  ],
+  "user_notes_summary": {
+    "uncertainties": [],
+    "needs_review": [],
+    "workarounds": ["suggest_related_code API call failed and was skipped"]
+  },
+  "eval_feedback": {
+    "suggestions": [
+      {
+        "assertion": "Presents a structured debug report with root cause hypothesis and fix suggestion",
+        "reason": "This assertion passes for any output that mentions a root cause and a fix. Consider tightening it to require the report identify the *specific* silent 404 path or the *specific* wrong field name bug, since those are the real findings. A generic report that says 'the search is broken, add logging' would also pass."
+      },
+      {
+        "reason": "No assertion checks whether the agent reads vector-store.ts (the actual file containing the root cause). An agent could satisfy all 5 expectations by reading only the MCP tool layer without drilling into the Qdrant client interaction — and miss the real bug. An assertion like 'Reads vector-store.ts to identify the 404 silent return' would be more discriminating."
+      }
+    ],
+    "overall": "The skill adds clear value: context_briefing, recall, search_graph, and find_symbol were all used purposefully and each yielded useful signal. The output is substantive — analysis.md includes a trace diagram, 3 ranked issues with code quotes, targeted fixes, blast radius, and prevention suggestions. The expectations themselves are slightly under-specified; they test process steps rather than correctness of findings."
+  }
+}

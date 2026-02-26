@@ -1,0 +1,114 @@
+{
+  "expectations": [
+    {
+      "text": "Calls get_adrs to find existing caching decisions",
+      "passed": true,
+      "evidence": "Transcript Step 1, Tool Call 1: 'get_adrs(query: \"caching embeddings Redis LRU\")' — returned 6 ADRs, none specifically about caching. Also confirmed in metrics.json: get_adrs: 1."
+    },
+    {
+      "text": "Calls get_patterns to find caching patterns",
+      "passed": true,
+      "evidence": "Transcript Step 1, Tool Call 2: 'get_patterns(query: \"caching embedding performance\")' — returned 8 patterns, identified 'Service Layer (Singleton)' as relevant. Confirmed in metrics.json: get_patterns: 1."
+    },
+    {
+      "text": "Calls get_tech_debt to check known cache-related issues",
+      "passed": true,
+      "evidence": "Transcript Step 1, Tool Call 3: 'get_tech_debt(impact: \"high\")' — result: no high-impact tech debt found. Confirmed in metrics.json: get_tech_debt: 1."
+    },
+    {
+      "text": "Presents options with pros/cons based on existing architecture",
+      "passed": true,
+      "evidence": "analysis.md presents three options (A: In-Memory LRU, B: Redis TTL/pipeline optimization, C: Hybrid) each with explicit Pros and Cons sections grounded in findings from cache.ts and embedding.ts code analysis. For example, Option A Cons include 'Дублювання даних (RAM + Redis) — кожний embedding ~4KB, 1000 записів = ~4MB' drawn from actual code review."
+    },
+    {
+      "text": "Waits for user decision before recording ADR",
+      "passed": true,
+      "evidence": "metrics.json: 'step_4_record_decision: false' with note 'Waiting for user decision before recording ADR (per SKILL.md workflow)'. analysis.md ends with 'Після підтвердження рішення буде записано: ADR...' (After confirming the decision will be recorded). No record_adr tool call was made."
+    }
+  ],
+  "summary": {
+    "passed": 5,
+    "failed": 0,
+    "total": 5,
+    "pass_rate": 1.0
+  },
+  "execution_metrics": {
+    "tool_calls": {
+      "get_adrs": 1,
+      "get_patterns": 1,
+      "get_tech_debt": 1,
+      "analyze_project_structure": 1,
+      "recall": 1,
+      "search_docs": 1,
+      "hybrid_search": 1,
+      "suggest_architecture": 1,
+      "search_graph": 1,
+      "Read": 3,
+      "Grep": 4,
+      "Write": 3
+    },
+    "total_tool_calls": 17,
+    "rag_tool_calls": 9,
+    "file_tool_calls": 7,
+    "output_files_written": 3,
+    "output_chars": null,
+    "transcript_chars": 5800
+  },
+  "timing": {
+    "executor_duration_seconds": 195.4,
+    "grader_duration_seconds": null,
+    "total_duration_seconds": 195.4
+  },
+  "claims": [
+    {
+      "claim": "No existing ADR specifically covers embedding caching strategy",
+      "type": "factual",
+      "verified": true,
+      "evidence": "get_adrs returned 6 ADRs; transcript and analysis.md both enumerate them and confirm none address caching. Consistent between both tools."
+    },
+    {
+      "claim": "All cache layers (L1/L2/L3) are Redis-based; no in-memory LRU exists",
+      "type": "factual",
+      "verified": true,
+      "evidence": "Tool Calls 9-10 read cache.ts (684 lines) and embedding.ts (352 lines) directly. Tool Call 13 grep for LRU/in-memory returned no matches. Finding explicitly stated: 'No in-memory LRU cache exists in the codebase.'"
+    },
+    {
+      "claim": "Prometheus cache metrics (embeddingCacheHits/Misses) are not wired into cache operations",
+      "type": "factual",
+      "verified": true,
+      "evidence": "Tool Call 14 reads metrics.ts and finds the counters exist but 'are not wired into the actual cache operations in cache.ts.' analysis.md confirms: 'embeddingCacheHits/embeddingCacheMisses в metrics.ts існують, але НЕ інкрементуються з cache.ts.'"
+    },
+    {
+      "claim": "Sprint 1 increased TTL from 3min to 30min, reducing embedding calls by ~40%",
+      "type": "factual",
+      "verified": true,
+      "evidence": "Tool Call 5 (recall) returned Sprint 1 Performance memory: 'Increase search cache TTL 3min->30min'. Consistent with MEMORY.md entry: 'Search cache TTL was 3min, increased to 30min (-40% embedding calls)'. Both sources corroborate the claim."
+    },
+    {
+      "claim": "17 tool calls total were made",
+      "type": "process",
+      "verified": true,
+      "evidence": "metrics.json: total_tool_calls: 17. Transcript summary table lists exactly 17 tool calls numbered 1-17."
+    }
+  ],
+  "user_notes_summary": {
+    "uncertainties": [],
+    "needs_review": [],
+    "workarounds": []
+  },
+  "eval_feedback": {
+    "suggestions": [
+      {
+        "assertion": "Waits for user decision before recording ADR",
+        "reason": "The assertion is satisfied by checking metrics.json step_4_record_decision=false plus the analysis.md closing statement. However, a stronger check would be to verify that record_adr does NOT appear anywhere in the tool call list — an agent could set the flag to false while still calling the tool. The assertion as written is appropriate but the grader had to cross-reference two artifacts to be confident."
+      },
+      {
+        "reason": "No assertion checks the quality of the options presented — e.g., whether pros/cons are grounded in actual code analysis (reading cache.ts/embedding.ts) vs. generic knowledge. Both runs produced technically reasonable options, but the with_skill run did deeper code analysis (17 tool calls, 9 RAG tools) yielding architecture-specific findings like the unconnected Prometheus metrics. An assertion like 'Options reference specific findings from the codebase (file names, line counts, or identified bugs)' would discriminate better between a well-researched and a generic response."
+      },
+      {
+        "reason": "No assertion checks whether get_tech_debt was called with appropriate filtering (e.g., impact level) rather than just called at all. The with_skill run filtered by impact='high' which is more targeted; a bare call with no args would also pass the current assertion."
+      }
+    ],
+    "overall": "Evals are well-designed for a consultation workflow. The main gap is that assertions check tool invocation but not the quality or grounding of the output produced from those tools."
+  }
+}

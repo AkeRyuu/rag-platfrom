@@ -1,0 +1,121 @@
+{
+  "expectations": [
+    {
+      "text": "Reads the file before reviewing",
+      "passed": true,
+      "evidence": "Transcript Step 1: 'Tool: Read(/home/ake/shared-ai-infra/rag-api/src/services/embedding.ts) — Result: 352-line TypeScript file. Multi-provider embedding service...'"
+    },
+    {
+      "text": "Calls get_patterns and get_adrs to load review criteria",
+      "passed": true,
+      "evidence": "Transcript Step 2a: 'Tool: mcp__rag__get_patterns(query: \"service layer embedding\") — Result: 8 patterns returned.' and Step 2b: 'Tool: mcp__rag__get_adrs(query: \"embedding provider caching\") — Result: 6 ADRs returned.' Both called in parallel."
+    },
+    {
+      "text": "Calls review_code with the file content",
+      "passed": true,
+      "evidence": "Transcript Step 3a: 'Tool: mcp__rag__review_code(code: <full file>, filePath: \"rag-api/src/services/embedding.ts\", reviewType: \"general\") — Result: TIMEOUT (120000ms exceeded).' The call was made with the file content, but it timed out. The tool was invoked correctly per the expectation; the timeout is a service-side failure not a failure to call the tool."
+    },
+    {
+      "text": "Calls check_architecture to validate against patterns",
+      "passed": true,
+      "evidence": "Transcript Step 3b: 'Tool: mcp__rag__check_architecture(code: <class structure>, filePath: \"rag-api/src/services/embedding.ts\", featureDescription: \"Multi-provider embedding service...\") — Result: 5 applicable patterns identified, 5 relevant ADRs.' Result is reflected in the review.md Pattern Compliance section."
+    },
+    {
+      "text": "Presents findings with severity levels (critical/warning/info)",
+      "passed": true,
+      "evidence": "review.md uses explicit severity labels: '#### 1. **Warning**: Значне дублювання логіки кешування', '#### 2. **Warning**: Використання `error: any`', '#### 3. **Warning**: Відсутня валідація вхідного тексту', '#### 4. **Warning**: Відсутній таймаут для HTTP запитів', '#### 5. **Warning**', '#### 6. **Info**', '#### 7. **Info**', '#### 8. **Info**'. Metrics confirm: critical=0, warning=5, info=3. Three severity levels are present."
+    },
+    {
+      "text": "Suggests tests via suggest_tests",
+      "passed": true,
+      "evidence": "Transcript Step 5a: 'Tool: mcp__rag__suggest_tests(file: \"rag-api/src/services/embedding.ts\", code: <method signatures>, framework: \"jest\") — Result: Returned existing test patterns from the codebase.' The review.md also includes a Test Coverage section listing 7 missing test scenarios."
+    }
+  ],
+  "summary": {
+    "passed": 6,
+    "failed": 0,
+    "total": 6,
+    "pass_rate": 1.0
+  },
+  "execution_metrics": {
+    "tool_calls": {
+      "get_patterns": 1,
+      "get_adrs": 1,
+      "get_tech_debt": 1,
+      "review_code": 1,
+      "check_architecture": 1,
+      "get_code_context": 2,
+      "search_graph": 1,
+      "suggest_tests": 1,
+      "Read": 4,
+      "Write": 3,
+      "Grep": 1
+    },
+    "total_tool_calls": 17,
+    "total_steps": 6,
+    "errors_encountered": 2,
+    "output_chars": null,
+    "transcript_chars": null
+  },
+  "timing": {
+    "executor_duration_seconds": 433.7,
+    "grader_duration_seconds": null,
+    "total_duration_seconds": 433.7
+  },
+  "claims": [
+    {
+      "claim": "review_code timed out but the review still proceeded with 8 issues identified",
+      "type": "process",
+      "verified": true,
+      "evidence": "Transcript Step 3a shows TIMEOUT. review.md contains 8 numbered issues (5 Warning, 3 Info) drawn from manual analysis and check_architecture results. metrics.json confirms issues_found=8."
+    },
+    {
+      "claim": "31 downstream files depend on embeddingService",
+      "type": "factual",
+      "verified": true,
+      "evidence": "Transcript Step 4a: search_graph returned 31 graph-connected files. Step 4b: Grep confirmed 60+ import/usage lines across 20+ files. review.md states '31 downstream файлів'. The Grep finding of 20+ files is consistent (the graph includes indirectly connected files)."
+    },
+    {
+      "claim": "Pattern compliance was verified against 3 patterns and 2 ADRs",
+      "type": "factual",
+      "verified": true,
+      "evidence": "review.md lists 3 pattern checks (Service Layer Singleton: PASS, Project Isolation: PASS, Zod Validation Middleware: N/A) and 2 ADR checks. metrics.json confirms patterns_checked=3, adrs_checked=2."
+    },
+    {
+      "claim": "No issues are labeled Critical despite HTTP timeout and input validation gaps being real production risks",
+      "type": "quality",
+      "verified": true,
+      "evidence": "review.md labels the most severe issues as 'Warning', not 'Critical'. The without_skill run labels those same two issues as CRITICAL. The with_skill review may have under-classified severity, though both findings are present."
+    },
+    {
+      "claim": "suggest_tests returned useful suggestions",
+      "type": "quality",
+      "verified": false,
+      "evidence": "Transcript Step 5a says suggest_tests 'Returned existing test patterns from the codebase (embedding.test.ts, memory test patterns)' — no concrete new test suggestions were generated. The test gap analysis in review.md came from manually reading the existing test file, not from suggest_tests output."
+    }
+  ],
+  "user_notes_summary": {
+    "uncertainties": [],
+    "needs_review": [],
+    "workarounds": [
+      "review_code timed out — skill fell back to manual analysis from check_architecture + other tools",
+      "get_code_context returned 400 error on first call, empty response on retry — tool effectively skipped"
+    ]
+  },
+  "eval_feedback": {
+    "suggestions": [
+      {
+        "assertion": "Calls review_code with the file content",
+        "reason": "The expectation passes even when review_code times out, which is the actual behavior here. A more discriminating assertion would be 'review_code succeeds and its output influences the findings' — distinguishing a genuine review from a timeout that was silently ignored."
+      },
+      {
+        "assertion": "Presents findings with severity levels (critical/warning/info)",
+        "reason": "The assertion passes as long as any severity labels appear. It does not check whether the severity assignments are correct. The with_skill run labels HTTP timeout absence as 'Warning' while without_skill labels it 'Critical'. No assertion catches this calibration difference. A stronger assertion would require the most severe issues (no timeouts, no input validation) to be labeled at least High or Critical."
+      },
+      {
+        "reason": "No assertion checks whether the review output references the specific ADR that mandates BGE-M3 as primary provider, or that pattern compliance was explicitly verified in the output. The check_architecture call succeeded but its connection to the final review is not validated."
+      }
+    ],
+    "overall": "All 6 assertions pass, but two are weak: review_code and suggest_tests both failed at the service level (timeout, empty response) yet both expectations pass. The evals would benefit from at least one assertion that verifies the quality or substance of the findings rather than just the presence of tool calls."
+  }
+}

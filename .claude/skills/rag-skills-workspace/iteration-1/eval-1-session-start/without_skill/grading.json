@@ -1,0 +1,118 @@
+{
+  "expectations": [
+    {
+      "text": "Calls start_session with a descriptive sessionId",
+      "passed": true,
+      "evidence": "Tool Call 1 in transcript calls start_session with sessionId: 'vector-store-optimization-2026-02-26' — includes the task name and date, clearly descriptive."
+    },
+    {
+      "text": "Calls get_developer_profile",
+      "passed": false,
+      "evidence": "Neither the transcript (9 tool calls documented) nor metrics.json (breakdown lists: start_session, context_briefing, Read, search_graph, recall x2, get_patterns, get_adrs, get_session_context) includes get_developer_profile. The tool was never called."
+    },
+    {
+      "text": "Calls context_briefing with task mentioning vector-store.ts optimization and files including vector-store.ts",
+      "passed": true,
+      "evidence": "Tool Call 2 calls context_briefing with task='Оптимізація пошуку в vector-store.ts — покращення продуктивності та якості пошукових запитів' and files=['rag-api/src/services/vector-store.ts']. Both task and file match."
+    },
+    {
+      "text": "Calls warm_cache with the sessionId",
+      "passed": false,
+      "evidence": "metrics.json tool breakdown has no warm_cache entry. The transcript documents 9 tool calls (Tool Call 1-9) and none of them is warm_cache. The tool was never called."
+    },
+    {
+      "text": "Presents a structured briefing with sections for previous context, relevant code, patterns, and dependencies",
+      "passed": false,
+      "evidence": "The summary has sections for 'Current State of vector-store.ts', 'Identified Optimization Opportunities', 'Eval Baseline', and 'Connected Services (Graph)'. Relevant code and dependencies are present. However, 'previous context' (session history, developer profile) is absent — get_developer_profile was never called so prior session context is not incorporated. Patterns are retrieved via get_patterns (Tool Call 6) but not surfaced as a named section in the summary. The briefing is partially structured but missing the 'previous context' and a dedicated 'patterns' section."
+    },
+    {
+      "text": "Runs start_session and get_developer_profile in parallel",
+      "passed": false,
+      "evidence": "get_developer_profile was never called at all (see expectation 2). The transcript shows start_session called alone in Tool Call 1, with no parallel get_developer_profile call."
+    },
+    {
+      "text": "Runs context_briefing and warm_cache in parallel after session starts",
+      "passed": false,
+      "evidence": "warm_cache was never called (see expectation 4). context_briefing appears in Tool Call 2, alone and sequential, not in a parallel batch with warm_cache."
+    }
+  ],
+  "summary": {
+    "passed": 2,
+    "failed": 5,
+    "total": 7,
+    "pass_rate": 0.286
+  },
+  "execution_metrics": {
+    "tool_calls": {
+      "mcp__rag__start_session": 1,
+      "mcp__rag__context_briefing": 1,
+      "Read": 1,
+      "mcp__rag__search_graph": 1,
+      "mcp__rag__recall": 2,
+      "mcp__rag__get_patterns": 1,
+      "mcp__rag__get_adrs": 1,
+      "mcp__rag__get_session_context": 1
+    },
+    "total_tool_calls": 9,
+    "total_steps": 9,
+    "errors_encountered": 2,
+    "output_chars": 4100,
+    "transcript_chars": 4200
+  },
+  "timing": {
+    "executor_duration_seconds": 231.2,
+    "total_duration_seconds": 231.2
+  },
+  "claims": [
+    {
+      "claim": "Tool calls 4+5 ran in parallel, tool calls 6+7 ran in parallel",
+      "type": "process",
+      "verified": true,
+      "evidence": "metrics.json notes field states 'Tool calls 4+5 ran in parallel, tool calls 6+7 ran in parallel'. Transcript confirms Tool Call 4 (search_graph) and Tool Call 5 (recall) are labeled '(parallel with Tool Call 5)' and '(parallel with Tool Call 4)' respectively. Same for Tool Calls 6+7."
+    },
+    {
+      "claim": "start_session had one timeout before succeeding on retry",
+      "type": "process",
+      "verified": false,
+      "evidence": "metrics.json notes mention 'start_session had one timeout before succeeding on retry', but the transcript shows only one start_session call with a clean result. The failed calls in metrics.json are Bash_permission_denied (2 failures), not a start_session timeout. The claim in the notes field is unverifiable from the transcript."
+    },
+    {
+      "claim": "2 Bash calls were permission-denied",
+      "type": "process",
+      "verified": true,
+      "evidence": "metrics.json failed.breakdown shows Bash_permission_denied: 2. The transcript does not document these failed calls explicitly, but they are not among the 9 documented tool calls."
+    },
+    {
+      "claim": "Session context fields returned as undefined",
+      "type": "factual",
+      "verified": true,
+      "evidence": "Tool Call 8 (get_session_context) result states 'Session context fields returned as undefined (lightweight session tracking)'."
+    },
+    {
+      "claim": "29 graph-connected files discovered via search_graph",
+      "type": "factual",
+      "verified": true,
+      "evidence": "Tool Call 4 (search_graph) result: '29 graph-connected files discovered'. metrics.json context_loaded.graph_files_discovered=29."
+    }
+  ],
+  "user_notes_summary": {
+    "uncertainties": [],
+    "needs_review": [],
+    "workarounds": []
+  },
+  "eval_feedback": {
+    "suggestions": [
+      {
+        "assertion": "Presents a structured briefing with sections for previous context, relevant code, patterns, and dependencies",
+        "reason": "This assertion is ambiguous about what 'sections' means — whether exact section headers are required or just that the content areas are covered. The without_skill run has some structure but omits previous context, and the assertion's failure case could be argued either way. Consider being explicit: e.g., 'The final response includes a named section for previous session context/memories'."
+      },
+      {
+        "reason": "No assertion distinguishes between the skill's sequential vs. parallel execution of context_briefing. The without_skill run does call context_briefing (expectation 3 passes) but uses it sequentially as part of a longer 9-tool serial workflow, whereas the skill runs it in a tighter 2-parallel-batch pattern. An assertion like 'completes session setup in 4 tool calls or fewer' or 'completes in under 3 batches' would discriminate between efficient and inefficient approaches."
+      },
+      {
+        "reason": "The without_skill run makes redundant calls (2x recall, get_patterns + get_adrs separately, get_session_context returning undefined) that context_briefing already covers. No assertion penalizes this redundancy or rewards the skill's leaner approach. Consider an assertion on total tool call count."
+      }
+    ],
+    "overall": "The evals clearly differentiate the two runs — the without_skill run fails 5 of 7 expectations while the with_skill run passes all 7. However, assertion 5 (structured briefing) could be made more precise, and there are no assertions that reward efficiency or penalize redundancy."
+  }
+}

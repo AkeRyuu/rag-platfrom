@@ -1,0 +1,108 @@
+{
+  "expectations": [
+    {
+      "text": "Calls context_briefing with debug task description",
+      "passed": false,
+      "evidence": "The without_skill transcript never calls context_briefing. metrics.json confirms mcp_rag: 0. All investigation was done using Glob, Grep, and Read tools only. The transcript has no Step referencing a context_briefing call."
+    },
+    {
+      "text": "Uses search_graph or find_symbol to trace the recall implementation",
+      "passed": false,
+      "evidence": "Neither search_graph nor find_symbol appear anywhere in the without_skill transcript. The agent used Glob (4 calls) and Grep (11 calls) for code discovery, but no RAG graph or symbol tools. metrics.json confirms mcp_rag: 0."
+    },
+    {
+      "text": "Reads relevant source files to understand the recall flow",
+      "passed": true,
+      "evidence": "Step 1 of the transcript lists 6 source files read to trace the recall path. Subsequent steps read mcp-server middleware, embedding service, routes, validation, tests, and Qdrant client library files. metrics.json confirms Read: 18 and files_analyzed: 24 — more files than the with_skill run. The call chain is explicitly documented in the transcript."
+    },
+    {
+      "text": "Checks for known issues via recall about similar bugs",
+      "passed": false,
+      "evidence": "The without_skill run never calls the recall MCP tool (or any RAG tool). metrics.json confirms mcp_rag: 0. There is no step in the transcript that queries agent memory for prior known bugs. The agent relies entirely on static code analysis."
+    },
+    {
+      "text": "Presents a structured debug report with root cause hypothesis and fix suggestion",
+      "passed": true,
+      "evidence": "The transcript itself serves as the structured report and includes: a documented call chain, root cause analysis with 4 findings (HIGH: silent 404, HIGH: named vector fallback, MEDIUM: wrong field name, MEDIUM: validated field type mismatch), debugging steps checklist, and 4 code-level fix suggestions with TypeScript snippets. This is a well-structured debug report."
+    }
+  ],
+  "summary": {
+    "passed": 2,
+    "failed": 3,
+    "total": 5,
+    "pass_rate": 0.4
+  },
+  "execution_metrics": {
+    "tool_calls": {
+      "Glob": 4,
+      "Grep": 11,
+      "Read": 18,
+      "Write": 2,
+      "Bash": 1,
+      "mcp_rag": 0,
+      "total": 36
+    },
+    "total_tool_calls": 36,
+    "total_steps": 10,
+    "errors_encountered": 0,
+    "output_chars": 0,
+    "transcript_chars": 9800
+  },
+  "timing": {
+    "executor_duration_seconds": 634.9,
+    "grader_duration_seconds": null,
+    "total_duration_seconds": 634.9
+  },
+  "claims": [
+    {
+      "claim": "The agent traced 4 bugs, 2 HIGH and 2 MEDIUM severity",
+      "type": "factual",
+      "verified": true,
+      "evidence": "metrics.json confirms bugs_found: 4, bugs_by_severity: {high: 2, medium: 2, low: 0}. The transcript documents RC1 (silent 404), RC2 (named vector fallback), RC3 (wrong field name), RC4 (validated keyword vs boolean) matching these counts."
+    },
+    {
+      "claim": "The Qdrant JS client properly propagates HTTP status via error.status",
+      "type": "factual",
+      "verified": true,
+      "evidence": "The agent read the Qdrant client source files (errors.js, api-client.js, qdrant-client.js, fetcher.js) and concluded 'The error thrown by the Qdrant client for HTTP 400 responses is an ApiError which HAS a .status property.' This is a deeper verification than the with_skill run performed."
+    },
+    {
+      "claim": "context-enrichment.ts uses .memories instead of .results (a confirmed bug)",
+      "type": "factual",
+      "verified": true,
+      "evidence": "Finding 3 in the transcript quotes the exact line: 'if (memoriesRes?.data?.memories)' and correctly identifies this returns undefined since the API returns { results }. The same bug was found independently by the with_skill run, confirming it is real."
+    },
+    {
+      "claim": "The agent read Qdrant client library source in node_modules",
+      "type": "process",
+      "verified": true,
+      "evidence": "The transcript explicitly lists 5 node_modules files read: errors.js, api-client.js, qdrant-client.js, fetcher.js, types.js. The files analyzed table in the transcript includes these paths. This is unique to the without_skill run — a deeper but also more time-consuming approach."
+    },
+    {
+      "claim": "The investigation took significantly longer without the skill (634s vs 433s)",
+      "type": "factual",
+      "verified": true,
+      "evidence": "timing.json for without_skill shows total_duration_seconds: 634.9 vs with_skill: 433.4. The without_skill run also used more total tool calls (36 vs 31) and analyzed more files (24 vs 11) to compensate for lacking RAG graph/symbol tools."
+    }
+  ],
+  "user_notes_summary": {
+    "uncertainties": [],
+    "needs_review": [],
+    "workarounds": ["Used Glob+Grep+Read to trace code instead of RAG graph/symbol tools; read node_modules library source to compensate for lack of symbol tracing tools"]
+  },
+  "eval_feedback": {
+    "suggestions": [
+      {
+        "assertion": "Calls context_briefing with debug task description",
+        "reason": "This assertion directly tests skill adoption and is the most discriminating expectation in the set — it passes in with_skill and fails in without_skill exactly as intended. Consider keeping it as a primary discriminator."
+      },
+      {
+        "reason": "The without_skill run produced a report of comparable quality to the with_skill run (both correctly identified the primary 404 bug, both found the context-enrichment field name bug), but took 46% longer (634s vs 433s). No assertion measures output quality parity or efficiency. An assertion like 'Identifies the context-enrichment.ts .memories vs .results field name mismatch' would test whether the key finding was reached regardless of method — and both runs would pass, revealing the skill's value is in efficiency rather than finding quality."
+      },
+      {
+        "reason": "The without_skill run went deeper in one dimension: it read Qdrant client library source to validate error.status propagation, and found an additional medium-severity bug (validated field indexed as keyword but stores boolean). No assertion checks depth of analysis or whether secondary bugs are identified. This could be a useful eval dimension."
+      }
+    ],
+    "overall": "The failing expectations (context_briefing, search_graph/find_symbol, recall) correctly reflect that without the skill the agent uses no RAG tooling. However, the without_skill agent produced a report of similar factual quality by relying on thorough static analysis — it just took significantly longer and missed the structured RAG context that briefing provides. The evals correctly differentiate process, but don't capture the quality-vs-speed tradeoff. Consider adding an efficiency assertion or a finding-accuracy assertion."
+  }
+}

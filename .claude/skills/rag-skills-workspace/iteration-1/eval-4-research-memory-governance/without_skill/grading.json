@@ -1,0 +1,115 @@
+{
+  "expectations": [
+    {
+      "text": "Uses hybrid_search or find_feature to locate memory governance code",
+      "passed": true,
+      "evidence": "Transcript Step 1 shows mcp__rag__hybrid_search was called with query 'memory governance quarantine promotion' and returned key files including memory-governance.ts. metrics.json confirms mcp__rag__hybrid_search: 1. No find_feature was attempted."
+    },
+    {
+      "text": "Uses find_symbol to look up specific functions like promote or quarantine",
+      "passed": false,
+      "evidence": "Neither the transcript nor metrics.json shows any use of find_symbol or mcp__rag__find_symbol. The without_skill run used Grep instead to locate promote_memory/promoteMemory and quarantine references. Tool call table in transcript: mcp__rag__hybrid_search: 1, Grep: 6, Read: 10, Write: 3 — find_symbol is absent."
+    },
+    {
+      "text": "Uses search_graph to trace dependencies between memory-related files",
+      "passed": false,
+      "evidence": "Neither the transcript nor metrics.json shows any use of search_graph or mcp__rag__search_graph. The without_skill run discovered file dependencies by reading files directly and following imports manually (e.g., reading fact-extractor.ts to find memoryGovernance.ingest() calls). Tool call table confirms: no search_graph call was made."
+    },
+    {
+      "text": "Presents findings with file:line references",
+      "passed": true,
+      "evidence": "research-output.md includes precise line references throughout: 'MemoryGovernanceService class (singleton exported as memoryGovernance)' with methods at 'lines 91-163', 'lines 168-231', 'lines 38-85', 'lines 330-425'. Code snippets cite 'memory-governance.ts, lines 91-163' and 'lines 168-231'. File paths are absolute and line ranges match the actual 430-line file size. API routes table lists line ranges for each endpoint."
+    },
+    {
+      "text": "Explains the flow from auto-memory to quarantine to promotion",
+      "passed": true,
+      "evidence": "research-output.md contains a detailed ASCII flow diagram showing: auto memory → memoryGovernance.ingest(source='auto_*', confidence=N) → confidence < adaptive_threshold (SKIP) / confidence >= threshold ({project}_memory_pending quarantine) → review_memories / promote_memory ({project}_agent_memory durable, reason: human_validated|pr_merged|tests_passed) / validate_memory (reject) / memory_maintenance (auto-promote 3+ feedback / auto-prune 2+ feedback). Section '1. Ingest Routing' at lines 91-163 with actual TypeScript code snippet also explains the flow."
+    }
+  ],
+  "summary": {
+    "passed": 3,
+    "failed": 2,
+    "total": 5,
+    "pass_rate": 0.6
+  },
+  "execution_metrics": {
+    "tool_calls": {
+      "mcp__rag__hybrid_search": 1,
+      "Grep": 6,
+      "Read": 10,
+      "Write": 3
+    },
+    "total_tool_calls": 20,
+    "total_steps": 8,
+    "errors_encountered": 0,
+    "output_chars": 9800,
+    "transcript_chars": 3600
+  },
+  "timing": {
+    "executor_duration_seconds": 198.1,
+    "grader_duration_seconds": null,
+    "total_duration_seconds": 198.1
+  },
+  "claims": [
+    {
+      "claim": "hybrid_search found memory-governance.ts as the core governance service",
+      "type": "factual",
+      "verified": true,
+      "evidence": "Transcript Step 1 states hybrid_search result 'Found key files: rag-api/src/services/memory-governance.ts (core governance service)'. The subsequent Read of that file confirmed it is 430 lines and contains MemoryGovernanceService with all governance methods."
+    },
+    {
+      "claim": "research-output.md includes TypeScript code snippets from actual source files",
+      "type": "quality",
+      "verified": true,
+      "evidence": "research-output.md contains three TypeScript code blocks: the ingest() routing logic (memory-governance.ts lines 91-163), the promote() code (lines 168-231), and fact-extractor source type list. These appear to be accurate excerpts from the files that were read in Steps 2-4."
+    },
+    {
+      "claim": "The without_skill run read the test file (memory-governance.test.ts)",
+      "type": "process",
+      "verified": true,
+      "evidence": "Transcript Step 7 shows: 'Tool: Read - /home/ake/shared-ai-infra/rag-api/src/__tests__/services/memory-governance.test.ts (295 lines)'. metrics.json also lists this file in files_read. This additional coverage (not done by with_skill) explains the more complete answer sections on test coverage."
+    },
+    {
+      "claim": "The without_skill run completed faster than the with_skill run",
+      "type": "factual",
+      "verified": true,
+      "evidence": "timing.json: without_skill took 198.1s vs with_skill 290.1s. The 92-second difference is largely explained by find_feature's 120s timeout in the with_skill run."
+    },
+    {
+      "claim": "The without_skill answer is more comprehensive than the with_skill answer",
+      "type": "quality",
+      "verified": true,
+      "evidence": "research-output.md (without_skill, ~9800 chars) is substantially larger than answer.md (with_skill, ~6800 chars). without_skill covers additional topics: memory aging (memory.ts lines 167-189), relationship detection (memory.ts lines 728-778), fact-extractor detail, auto_remember tool in ask.ts, and test file analysis — none of which appear in the with_skill answer.md. However, with_skill answer is still correct and well-structured."
+    },
+    {
+      "claim": "Dependencies between files were traced by direct file reading rather than graph traversal",
+      "type": "process",
+      "verified": true,
+      "evidence": "The transcript shows the without_skill run read fact-extractor.ts to discover it calls memoryGovernance.ingest(), and read ask.ts to find auto_remember routes through /api/memory. These dependency chains were found by following import clues in code, not by search_graph. The with_skill run used search_graph which returned 16 connected files in one call."
+    }
+  ],
+  "user_notes_summary": {
+    "uncertainties": [],
+    "needs_review": [],
+    "workarounds": []
+  },
+  "eval_feedback": {
+    "suggestions": [
+      {
+        "assertion": "Uses find_symbol to look up specific functions like promote or quarantine",
+        "reason": "This is a discriminating assertion that correctly separates the two runs: with_skill used find_symbol (2 calls), without_skill did not. However, the without_skill run still found the relevant functions via Grep. Consider whether the goal is to test tool selection strategy or research outcome quality — the current assertion tests the former."
+      },
+      {
+        "assertion": "Uses search_graph to trace dependencies between memory-related files",
+        "reason": "Also correctly discriminating. The without_skill run found dependencies manually by reading files sequentially, which took more steps but yielded equally accurate results (and actually surfaced more files like fact-extractor and ask.ts). A better assertion might be 'Identifies the dependency chain from MCP tool → API route → governance service → memory service' which tests the research outcome regardless of which tools were used."
+      },
+      {
+        "reason": "The without_skill run produced a more comprehensive answer (includes test analysis, memory aging, relationship detection, fact-extractor) but scores lower (3/5) because it didn't use the specific tools the eval checks for. An assertion on output completeness or depth would catch this — e.g., 'Explains at least 4 distinct sub-mechanisms of the governance system (ingest routing, adaptive threshold, feedback maintenance, quality gates)'."
+      },
+      {
+        "reason": "The eval does not check whether the architectural pattern 'Memory Dual-Tier Governance' was retrieved from the pattern store (get_patterns), which is a meaningful RAG capability. The with_skill run retrieved this pattern; the without_skill run reconstructed the same architecture from first principles. Adding an assertion on get_patterns usage would better differentiate the skill's value."
+      }
+    ],
+    "overall": "The tool-invocation assertions (expectations 2 and 3) correctly differentiate the two runs. However, both runs produce high-quality, accurate research outputs — the without_skill run's lower score (3/5 vs 5/5) reflects tool selection differences, not research quality differences. The eval could be strengthened by adding outcome-based assertions that reward depth and accuracy independent of tool choice."
+  }
+}
