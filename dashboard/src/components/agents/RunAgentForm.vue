@@ -94,7 +94,7 @@ function submitAutonomous() {
       <div style="display: flex; gap: 1rem; align-items: center;">
         <div style="flex: 1;">
           <label style="font-size: 0.8rem; display: block; margin-bottom: 0.25rem;">Max Iterations</label>
-          <InputNumber v-model="maxIterations" :min="1" :max="20" style="width: 100%;" />
+          <InputNumber v-model="maxIterations" :min="1" :max="100" style="width: 100%;" />
         </div>
         <div style="display: flex; align-items: center; gap: 0.5rem; padding-top: 1rem;">
           <Checkbox v-model="includeThinking" :binary="true" inputId="thinking" />

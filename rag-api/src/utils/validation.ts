@@ -424,7 +424,7 @@ export const runAgentSchema = z.object({
   agentType: z.enum(['research', 'review', 'documentation', 'refactor', 'test']),
   task: z.string().min(1).max(10000),
   context: z.string().max(50000).optional(),
-  maxIterations: z.number().int().min(1).max(20).optional(),
+  maxIterations: z.number().int().min(1).max(100).optional(),
   timeout: z.number().int().min(5000).max(300000).optional(),
   includeThinking: z.boolean().optional(),
 });

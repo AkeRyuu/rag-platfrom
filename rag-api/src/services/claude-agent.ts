@@ -188,6 +188,7 @@ class ClaudeAgentService {
         env: {
           ...process.env,
           ANTHROPIC_API_KEY: config.ANTHROPIC_API_KEY || '',
+          CLAUDECODE: '',
         },
       };
 
