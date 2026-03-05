@@ -122,7 +122,7 @@ export const createMemorySchema = z.object({
   type: memoryTypeSchema.default('note'),
   tags: z.array(z.string().max(50)).max(20).optional(),
   relatedTo: z.string().max(200).optional(),
-  metadata: z.record(z.unknown()).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
 });
 
 export const recallMemorySchema = z.object({
@@ -231,7 +231,7 @@ export const trackUsageSchema = z.object({
   resultCount: z.number().optional(),
   success: z.boolean().default(true),
   errorMessage: z.string().optional(),
-  metadata: z.record(z.unknown()).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
 });
 
 export const searchFeedbackSchema = z.object({
@@ -316,7 +316,7 @@ export function validateProjectName(
   if (!result.success) {
     return res.status(400).json({
       error: 'Invalid project name',
-      details: result.error.errors,
+      details: result.error.issues,
     });
   }
 
