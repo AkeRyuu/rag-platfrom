@@ -14,6 +14,10 @@ import path from 'path';
 import config from '../config';
 import { logger } from '../utils/logger';
 import { workRegistry } from './work-handler';
+import { smartDispatch } from './smart-dispatch';
+import { agentRuntime } from './agent-runtime';
+import { tribunalService } from './tribunal';
+import { withSpan } from '../utils/tracing';
 
 // ============================================
 // Types
@@ -140,6 +144,14 @@ class ClaudeAgentService {
    * Run an autonomous Claude agent.
    */
   async run(options: AutonomousAgentOptions): Promise<AutonomousAgentResult> {
+    return withSpan('claude_agent.run', {
+      type: options.type,
+      project: options.projectName,
+      task: options.task.slice(0, 100),
+    }, async () => this._run(options));
+  }
+
+  private async _run(options: AutonomousAgentOptions): Promise<AutonomousAgentResult> {
     const agentId = uuidv4();
     const agentConfig = AGENT_CONFIGS[options.type];
     const startTime = Date.now();
@@ -347,6 +359,238 @@ class ClaudeAgentService {
       defaultBudget: cfg.defaultBudget,
     }));
   }
+
+  /**
+   * Run a multi-step workflow that chains orchestrators.
+   *
+   * Steps are grouped by `parallel` field — steps in the same group run via Promise.all,
+   * groups execute sequentially. Each step's result is stored in WorkflowContext.results[step.id].
+   */
+  async runWorkflow(options: {
+    projectName: string;
+    projectPath: string;
+    steps: WorkflowStep[];
+  }): Promise<WorkflowResult> {
+    return withSpan('claude_agent.workflow', {
+      project: options.projectName,
+      step_count: options.steps.length,
+      steps: options.steps.map(s => s.id).join(','),
+    }, async () => this._runWorkflow(options));
+  }
+
+  private async _runWorkflow(options: {
+    projectName: string;
+    projectPath: string;
+    steps: WorkflowStep[];
+  }): Promise<WorkflowResult> {
+    const workflowId = uuidv4();
+    const startTime = Date.now();
+    const { projectName, projectPath, steps } = options;
+
+    const context: WorkflowContext = {
+      results: {},
+      completedSteps: [],
+      projectName,
+      projectPath,
+    };
+
+    const workHandle = workRegistry.register({
+      id: workflowId,
+      type: 'agent',
+      projectName,
+      description: `Workflow: ${steps.map(s => s.id).join(' → ')}`,
+      metadata: { stepCount: steps.length },
+    });
+
+    const stepTimings: Record<string, number> = {};
+
+    try {
+      // Group steps: steps with same `parallel` value run together, others run alone
+      const groups = this.groupWorkflowSteps(steps);
+
+      for (const group of groups) {
+        // Filter out steps whose condition returns false
+        const runnableSteps = group.filter(
+          step => !step.condition || step.condition(context)
+        );
+
+        if (runnableSteps.length === 0) continue;
+
+        // Execute group in parallel
+        const groupResults = await Promise.all(
+          runnableSteps.map(async step => {
+            const stepStart = Date.now();
+            const stepConfig = step.transform
+              ? { ...step.config, ...step.transform(context) }
+              : step.config;
+
+            try {
+              const result = await this.executeWorkflowStep(step.type, stepConfig, context);
+              stepTimings[step.id] = Date.now() - stepStart;
+              return { id: step.id, result, error: undefined };
+            } catch (error: any) {
+              stepTimings[step.id] = Date.now() - stepStart;
+              return { id: step.id, result: undefined, error: error.message };
+            }
+          })
+        );
+
+        for (const { id, result, error } of groupResults) {
+          context.results[id] = error ? { error } : result;
+          context.completedSteps.push(id);
+        }
+
+        workHandle.update({
+          progress: {
+            current: context.completedSteps.length,
+            total: steps.length,
+            percentage: Math.round((context.completedSteps.length / steps.length) * 100),
+          },
+        });
+      }
+
+      workHandle.complete({ stepsCompleted: context.completedSteps.length });
+
+      return {
+        id: workflowId,
+        status: 'completed',
+        results: context.results,
+        completedSteps: context.completedSteps,
+        stepTimings,
+        durationMs: Date.now() - startTime,
+      };
+    } catch (error: any) {
+      workHandle.fail(error.message);
+      return {
+        id: workflowId,
+        status: 'failed',
+        results: context.results,
+        completedSteps: context.completedSteps,
+        stepTimings,
+        error: error.message,
+        durationMs: Date.now() - startTime,
+      };
+    }
+  }
+
+  /**
+   * Group steps: steps sharing the same `parallel` ID run together.
+   * Steps without `parallel` run in their own group, preserving order.
+   */
+  private groupWorkflowSteps(steps: WorkflowStep[]): WorkflowStep[][] {
+    const groups: WorkflowStep[][] = [];
+    const parallelGroups = new Map<string, WorkflowStep[]>();
+    const order: (string | number)[] = []; // track insertion order
+
+    for (let i = 0; i < steps.length; i++) {
+      const step = steps[i];
+      if (step.parallel) {
+        if (!parallelGroups.has(step.parallel)) {
+          parallelGroups.set(step.parallel, []);
+          order.push(step.parallel);
+        }
+        parallelGroups.get(step.parallel)!.push(step);
+      } else {
+        order.push(i);
+      }
+    }
+
+    for (const key of order) {
+      if (typeof key === 'string') {
+        const group = parallelGroups.get(key);
+        if (group && group.length > 0) {
+          groups.push(group);
+          parallelGroups.delete(key); // only emit once
+        }
+      } else {
+        groups.push([steps[key]]);
+      }
+    }
+
+    return groups;
+  }
+
+  /**
+   * Execute a single workflow step by type.
+   */
+  private async executeWorkflowStep(
+    type: WorkflowStep['type'],
+    stepConfig: Record<string, unknown>,
+    context: WorkflowContext,
+  ): Promise<unknown> {
+    switch (type) {
+      case 'smart_dispatch':
+        return smartDispatch.dispatch({
+          projectName: context.projectName,
+          task: String(stepConfig.task || ''),
+          files: stepConfig.files as string[] | undefined,
+          intent: stepConfig.intent as any,
+        });
+
+      case 'agent':
+        return agentRuntime.run({
+          projectName: context.projectName,
+          agentType: String(stepConfig.type || stepConfig.agentType || 'research'),
+          task: String(stepConfig.task || ''),
+          context: stepConfig.context as string | undefined,
+        });
+
+      case 'tribunal':
+        return tribunalService.debate({
+          projectName: context.projectName,
+          topic: String(stepConfig.topic || ''),
+          positions: (stepConfig.positions as string[]) || [],
+          context: stepConfig.context as string | undefined,
+          maxRounds: stepConfig.maxRounds as number | undefined,
+          useCodeContext: stepConfig.useCodeContext as boolean | undefined,
+          autoRecord: stepConfig.autoRecord as boolean | undefined,
+          maxBudget: stepConfig.maxBudget as number | undefined,
+        });
+
+      case 'claude_agent':
+        return this.run({
+          projectName: context.projectName,
+          projectPath: context.projectPath,
+          type: (stepConfig.type || 'research') as AutonomousAgentType,
+          task: String(stepConfig.task || ''),
+          maxTurns: stepConfig.maxTurns as number | undefined,
+          maxBudgetUsd: stepConfig.maxBudgetUsd as number | undefined,
+        });
+
+      default:
+        throw new Error(`Unknown workflow step type: ${type}`);
+    }
+  }
+}
+
+// ============================================
+// Workflow Types
+// ============================================
+
+export interface WorkflowStep {
+  id: string;
+  type: 'smart_dispatch' | 'agent' | 'tribunal' | 'claude_agent';
+  config: Record<string, unknown>;
+  parallel?: string;     // group ID — steps in same group run via Promise.all
+  condition?: (context: WorkflowContext) => boolean;
+  transform?: (context: WorkflowContext) => Record<string, unknown>;
+}
+
+export interface WorkflowContext {
+  results: Record<string, unknown>;
+  completedSteps: string[];
+  projectName: string;
+  projectPath: string;
+}
+
+export interface WorkflowResult {
+  id: string;
+  status: 'completed' | 'failed';
+  results: Record<string, unknown>;
+  completedSteps: string[];
+  stepTimings: Record<string, number>;
+  error?: string;
+  durationMs: number;
 }
 
 export const claudeAgentService = new ClaudeAgentService();

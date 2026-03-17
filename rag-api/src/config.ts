@@ -66,6 +66,11 @@ export interface Config {
   MEMORY_COMPACTION_THRESHOLD: number;
   MEMORY_COMPACTION_CYCLE_DAYS: number;
 
+  // Smart Dispatch Cache
+  DISPATCH_CACHE_TTL_DAYS: number;
+  DISPATCH_CONFIDENCE_DECAY: number;
+  DISPATCH_CONFIDENCE_THRESHOLD: number;
+
   // Tribunal
   TRIBUNAL_MAX_ROUNDS: number;
   TRIBUNAL_MAX_BUDGET: number;
@@ -136,6 +141,11 @@ const config: Config = {
   MEMORY_DECAY_MAX: parseFloat(process.env.MEMORY_DECAY_MAX || '0.50'),
   MEMORY_COMPACTION_THRESHOLD: parseFloat(process.env.MEMORY_COMPACTION_THRESHOLD || '0.85'),
   MEMORY_COMPACTION_CYCLE_DAYS: parseInt(process.env.MEMORY_COMPACTION_CYCLE_DAYS || '90', 10),
+
+  // Smart Dispatch Cache
+  DISPATCH_CACHE_TTL_DAYS: parseInt(process.env.DISPATCH_CACHE_TTL_DAYS || '30', 10),
+  DISPATCH_CONFIDENCE_DECAY: parseFloat(process.env.DISPATCH_CONFIDENCE_DECAY || '0.1'),
+  DISPATCH_CONFIDENCE_THRESHOLD: parseFloat(process.env.DISPATCH_CONFIDENCE_THRESHOLD || '0.6'),
 
   // Tribunal
   TRIBUNAL_MAX_ROUNDS: parseInt(process.env.TRIBUNAL_MAX_ROUNDS || '1', 10),

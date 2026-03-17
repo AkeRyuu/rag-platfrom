@@ -15,6 +15,8 @@ import { symbolIndex } from './symbol-index';
 import { llm } from './llm';
 import { parseLLMOutput, routingSchema } from '../utils/llm-output';
 import { logger } from '../utils/logger';
+import { withSpan } from '../utils/tracing';
+import { cacheService } from './cache';
 import config from '../config';
 
 export type LookupType = 'memory' | 'code_search' | 'patterns' | 'adrs' | 'graph' | 'docs' | 'symbols';
@@ -67,33 +69,64 @@ class SmartDispatchService {
    * Route a task to the appropriate lookups and execute them in parallel.
    */
   async dispatch(request: SmartDispatchRequest): Promise<SmartDispatchResult> {
+    return withSpan('smart_dispatch', {
+      task: request.task.slice(0, 100),
+      intent: request.intent || '',
+      project: request.projectName,
+    }, async (span) => this._dispatch(request, span));
+  }
+
+  private async _dispatch(request: SmartDispatchRequest, span?: any): Promise<SmartDispatchResult> {
     const totalStart = Date.now();
     const { projectName, task, files, intent } = request;
 
-    // Step 1: LLM routing decision
+    // 4-Tier routing pipeline
     const planStart = Date.now();
     let plan: LookupType[];
     let reasoning: string;
+    let routeSource: string;
 
-    try {
-      const routingResult = await this.planLookups(task, files, intent);
-      plan = routingResult.lookups;
-      reasoning = routingResult.reasoning;
-    } catch (error: any) {
-      // Fallback: if LLM fails, use heuristic routing
-      logger.warn('LLM routing failed, using heuristic', { error: error.message });
-      const heuristic = this.heuristicRoute(task, files, intent);
-      plan = heuristic.lookups;
-      reasoning = heuristic.reasoning;
+    // Tier 0: Symbol pre-filter — deterministic, fast
+    const symbolRoute = await this.symbolPreFilter(projectName, task);
+    if (symbolRoute) {
+      plan = symbolRoute;
+      reasoning = 'Symbol pre-filter: found matching symbols → code_search + symbols + graph';
+      routeSource = 'symbol-prefilter';
+    } else {
+      // Tier 1: Cross-session cache
+      const cached = await this.getCachedRouting(projectName, task);
+      if (cached) {
+        plan = cached.lookups;
+        reasoning = `Cache hit (confidence: ${cached.confidence.toFixed(2)}): ${cached.reasoning}`;
+        routeSource = 'cache-hit';
+      } else {
+        // Tier 2: LLM routing
+        try {
+          const routingResult = await this.planLookups(task, files, intent);
+          plan = routingResult.lookups;
+          reasoning = routingResult.reasoning;
+          routeSource = 'llm';
+        } catch (error: any) {
+          // Tier 3: Heuristic fallback
+          logger.warn('LLM routing failed, using heuristic', { error: error.message });
+          const heuristic = this.heuristicRoute(task, files, intent);
+          plan = heuristic.lookups;
+          reasoning = heuristic.reasoning;
+          routeSource = 'heuristic';
+        }
+
+        // Cache the routing decision for future use (fire-and-forget)
+        this.cacheRoutingDecision(projectName, task, plan, reasoning).catch(() => {});
+      }
     }
     const planMs = Date.now() - planStart;
 
-    // Step 2: Execute lookups in parallel
+    // Execute lookups in parallel
     const executeStart = Date.now();
     const context = await this.executeLookups(projectName, task, files, plan);
     const executeMs = Date.now() - executeStart;
 
-    return {
+    const result = {
       plan,
       reasoning,
       context,
@@ -103,6 +136,127 @@ class SmartDispatchService {
         totalMs: Date.now() - totalStart,
       },
     };
+
+    if (span?.setAttribute) {
+      span.setAttribute('plan', plan.join(','));
+      span.setAttribute('route_source', routeSource);
+      span.setAttribute('plan_ms', planMs);
+      span.setAttribute('execute_ms', executeMs);
+    }
+
+    return result;
+  }
+
+  // ── Tier 0: Symbol Pre-Filter ──────────────────────────
+
+  /**
+   * If the task mentions recognizable symbols, we know deterministically
+   * that code_search + symbols + graph are needed.
+   */
+  private async symbolPreFilter(projectName: string, task: string): Promise<LookupType[] | null> {
+    const symbols = task.match(/[A-Z][a-zA-Z0-9]+|[a-z]+[A-Z][a-zA-Z0-9]*/g) || [];
+    const uniqueSymbols = [...new Set(symbols)].slice(0, 3);
+    if (uniqueSymbols.length === 0) return null;
+
+    let resolved = 0;
+    for (const sym of uniqueSymbols) {
+      try {
+        const results = await symbolIndex.findSymbol(projectName, sym, undefined, 1);
+        if (results.length > 0) resolved++;
+      } catch {
+        // ignore
+      }
+    }
+
+    if (resolved === 0) return null;
+    return ['code_search', 'symbols', 'graph'];
+  }
+
+  // ── Tier 1: Cross-Session Cache ────────────────────────
+
+  /**
+   * Check Redis for a cached routing decision based on task embedding similarity.
+   */
+  private async getCachedRouting(
+    projectName: string,
+    task: string,
+  ): Promise<{ lookups: LookupType[]; reasoning: string; confidence: number } | null> {
+    if (!cacheService.isEnabled()) return null;
+
+    try {
+      const embedding = await embeddingService.embed(task);
+      const embeddingHash = this.hashEmbedding(embedding);
+      const cacheKey = `routing:${projectName}:${embeddingHash}`;
+
+      const cached = await cacheService.get<{
+        lookups: LookupType[];
+        reasoning: string;
+        confidence: number;
+        timestamp: number;
+      }>(cacheKey);
+
+      if (!cached) return null;
+
+      // Apply confidence decay
+      const daysSinceCreated = (Date.now() - cached.timestamp) / (1000 * 60 * 60 * 24);
+      const decayedConfidence = cached.confidence * Math.exp(-config.DISPATCH_CONFIDENCE_DECAY * daysSinceCreated);
+
+      if (decayedConfidence < config.DISPATCH_CONFIDENCE_THRESHOLD) {
+        logger.debug('Smart dispatch cache expired (confidence decay)', {
+          original: cached.confidence,
+          decayed: decayedConfidence,
+          days: daysSinceCreated,
+        });
+        return null;
+      }
+
+      return {
+        lookups: cached.lookups,
+        reasoning: cached.reasoning,
+        confidence: decayedConfidence,
+      };
+    } catch (e: any) {
+      logger.debug('Smart dispatch cache lookup failed', { error: e.message });
+      return null;
+    }
+  }
+
+  /**
+   * Store a routing decision in Redis for cross-session reuse.
+   */
+  private async cacheRoutingDecision(
+    projectName: string,
+    task: string,
+    lookups: LookupType[],
+    reasoning: string,
+  ): Promise<void> {
+    if (!cacheService.isEnabled()) return;
+
+    try {
+      const embedding = await embeddingService.embed(task);
+      const embeddingHash = this.hashEmbedding(embedding);
+      const cacheKey = `routing:${projectName}:${embeddingHash}`;
+      const ttlSeconds = config.DISPATCH_CACHE_TTL_DAYS * 24 * 60 * 60;
+
+      await cacheService.set(cacheKey, {
+        lookups,
+        reasoning,
+        confidence: 1.0,
+        timestamp: Date.now(),
+      }, ttlSeconds);
+    } catch (e: any) {
+      logger.debug('Smart dispatch cache write failed', { error: e.message });
+    }
+  }
+
+  /**
+   * Hash an embedding vector to a short string for cache key.
+   */
+  private hashEmbedding(embedding: number[]): string {
+    // Use first 32 dimensions for a fast hash
+    const slice = embedding.slice(0, 32).map(v => Math.round(v * 1000));
+    const crypto = require('crypto');
+    return crypto.createHash('md5').update(slice.join(',')).digest('hex').slice(0, 16);
   }
 
   /**
@@ -248,15 +402,19 @@ class SmartDispatchService {
       );
     }
 
-    if (lookupSet.has('graph') && files && files.length > 0) {
-      promises.push(
-        graphStore.expand(projectName, files.slice(0, 5), 1)
-          .then(expanded => {
-            const deps = expanded.filter(f => !files.includes(f));
-            context.graphDeps = deps.map(f => ({ file: f }));
-          })
-          .catch(e => { logger.debug('Smart dispatch: graph lookup failed', { error: e.message }); })
-      );
+    if (lookupSet.has('graph')) {
+      // If no files provided, try to infer them from symbols in the task
+      const graphFiles = (files && files.length > 0) ? files : await this.inferFiles(projectName, task);
+      if (graphFiles.length > 0) {
+        promises.push(
+          graphStore.expand(projectName, graphFiles.slice(0, 5), 1)
+            .then(expanded => {
+              const deps = expanded.filter(f => !graphFiles.includes(f));
+              context.graphDeps = deps.map(f => ({ file: f }));
+            })
+            .catch(e => { logger.debug('Smart dispatch: graph lookup failed', { error: e.message }); })
+        );
+      }
     }
 
     if (lookupSet.has('docs')) {
@@ -277,6 +435,28 @@ class SmartDispatchService {
 
     await Promise.allSettled(promises);
     return context;
+  }
+
+  /**
+   * Infer relevant file paths from symbol names found in the task text.
+   */
+  private async inferFiles(projectName: string, task: string): Promise<string[]> {
+    const symbolCandidates = task.match(/[A-Z][a-zA-Z0-9]+|[a-z]+[A-Z][a-zA-Z0-9]*/g) || [];
+    const uniqueSymbols = [...new Set(symbolCandidates)].slice(0, 3);
+
+    const files = new Set<string>();
+    for (const sym of uniqueSymbols) {
+      try {
+        const results = await symbolIndex.findSymbol(projectName, sym, undefined, 1);
+        for (const r of results) {
+          if (r.file) files.add(r.file);
+        }
+      } catch {
+        // Symbol lookup may fail
+      }
+    }
+
+    return [...files].slice(0, 5);
   }
 
   /**

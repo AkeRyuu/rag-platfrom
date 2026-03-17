@@ -13,6 +13,7 @@ import {
   runAgentSchema,
   autonomousAgentSchema,
   stopAutonomousAgentSchema,
+  workflowSchema,
 } from '../utils/validation';
 
 const router = Router();
@@ -96,6 +97,21 @@ router.post(
       includeStreaming,
     });
 
+    res.json(result);
+  })
+);
+
+/**
+ * Run a multi-step workflow chaining orchestrators
+ * POST /api/agent/workflow
+ */
+router.post(
+  '/agent/workflow',
+  validateProjectName,
+  validate(workflowSchema),
+  asyncHandler(async (req: Request, res: Response) => {
+    const { projectName, projectPath, steps } = req.body;
+    const result = await claudeAgentService.runWorkflow({ projectName, projectPath, steps });
     res.json(result);
   })
 );

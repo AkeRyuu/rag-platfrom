@@ -64,6 +64,8 @@ export const DEFAULT_SKIP_TOOLS = new Set([
 
 export class ContextEnricher {
   private config: EnrichmentConfig;
+  private cache = new Map<string, { result: string | null; expiresAt: number }>();
+  private static CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
   constructor(config: Partial<EnrichmentConfig> = {}) {
     this.config = {
@@ -73,6 +75,13 @@ export class ContextEnricher {
       minRelevance: config.minRelevance ?? 0.6,
       timeoutMs: config.timeoutMs ?? 2000,
     };
+  }
+
+  /**
+   * Clear enrichment cache (call on session end).
+   */
+  clearCache(): void {
+    this.cache.clear();
   }
 
   /**
@@ -92,11 +101,32 @@ export class ContextEnricher {
     const query = this.extractQuery(args);
     if (!query) return null;
 
+    // Check per-session cache
+    const cacheKey = `${ctx.activeSessionId || 'no-session'}:${query.slice(0, 100)}`;
+    const cached = this.cache.get(cacheKey);
+    if (cached && Date.now() < cached.expiresAt) {
+      return cached.result;
+    }
+
     try {
       const memories = await this.recallWithTimeout(query, ctx);
-      if (memories.length === 0) return null;
+      const result = memories.length === 0 ? null : this.formatContext(memories);
 
-      return this.formatContext(memories);
+      // Store in cache
+      this.cache.set(cacheKey, {
+        result,
+        expiresAt: Date.now() + ContextEnricher.CACHE_TTL_MS,
+      });
+
+      // Evict expired entries lazily (every 50 calls)
+      if (this.cache.size > 100) {
+        const now = Date.now();
+        for (const [key, entry] of this.cache) {
+          if (now > entry.expiresAt) this.cache.delete(key);
+        }
+      }
+
+      return result;
     } catch {
       // Enrichment should never break tool calls
       return null;

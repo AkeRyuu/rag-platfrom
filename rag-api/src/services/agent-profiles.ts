@@ -93,7 +93,7 @@ export const agentProfiles: Record<string, AgentProfile> = {
     systemPrompt: buildSystemPrompt('research', config.LLM_PROVIDER === 'anthropic'
       ? `${CLAUDE_AGENT_INSTRUCTIONS}\n\nYou are a Research Agent. Thoroughly investigate the codebase to answer questions.\n\nYour answer should include:\n- Key findings with file references\n- Relevant patterns or conventions discovered\n- Connections between different parts of the codebase`
       : `${REACT_FORMAT_INSTRUCTIONS}\n\nYou are a Research Agent. Thoroughly investigate the codebase to answer questions.\n\nYour answer should include:\n- Key findings with file references\n- Relevant patterns or conventions discovered\n- Connections between different parts of the codebase`),
-    allowedActions: ['search_codebase', 'recall_memory', 'get_patterns', 'get_adrs', 'search_similar'],
+    allowedActions: ['search_codebase', 'recall_memory', 'get_patterns', 'get_adrs', 'search_similar', 'hybrid_search', 'search_graph', 'find_symbol', 'search_docs'],
     outputFormat: 'markdown',
     maxIterations: config.LLM_PROVIDER === 'anthropic' ? 15 : 10,
     timeout: config.AGENT_TIMEOUT,
@@ -106,7 +106,7 @@ export const agentProfiles: Record<string, AgentProfile> = {
     systemPrompt: buildSystemPrompt('review', config.LLM_PROVIDER === 'anthropic'
       ? `${CLAUDE_AGENT_INSTRUCTIONS}\n\nYou are a Code Review Agent. Review code against project standards and conventions.\n\nYour answer should include:\n- Pattern compliance assessment\n- Specific issues found (with severity)\n- Suggested improvements\n- Positive aspects of the code`
       : `${REACT_FORMAT_INSTRUCTIONS}\n\nYou are a Code Review Agent. Review code against project standards and conventions.\n\nYour answer should include:\n- Pattern compliance assessment\n- Specific issues found (with severity)\n- Suggested improvements\n- Positive aspects of the code`),
-    allowedActions: ['recall_memory', 'get_patterns', 'get_adrs', 'search_codebase', 'search_similar'],
+    allowedActions: ['recall_memory', 'get_patterns', 'get_adrs', 'search_codebase', 'search_similar', 'hybrid_search', 'search_graph', 'find_symbol'],
     outputFormat: 'markdown',
     maxIterations: config.LLM_PROVIDER === 'anthropic' ? 12 : 6,
     timeout: config.AGENT_TIMEOUT,
@@ -119,7 +119,7 @@ export const agentProfiles: Record<string, AgentProfile> = {
     systemPrompt: buildSystemPrompt('documentation', config.LLM_PROVIDER === 'anthropic'
       ? `${CLAUDE_AGENT_INSTRUCTIONS}\n\nYou are a Documentation Agent. Analyze code and produce clear documentation.\n\nYour answer should include:\n- Overview of what the code does\n- Key interfaces/types explained\n- Usage examples where applicable\n- Dependencies and relationships`
       : `${REACT_FORMAT_INSTRUCTIONS}\n\nYou are a Documentation Agent. Analyze code and produce clear documentation.\n\nYour answer should include:\n- Overview of what the code does\n- Key interfaces/types explained\n- Usage examples where applicable\n- Dependencies and relationships`),
-    allowedActions: ['search_codebase', 'recall_memory', 'get_patterns', 'search_similar'],
+    allowedActions: ['search_codebase', 'recall_memory', 'get_patterns', 'search_similar', 'search_docs', 'find_symbol'],
     outputFormat: 'markdown',
     maxIterations: config.LLM_PROVIDER === 'anthropic' ? 10 : 6,
     timeout: config.AGENT_TIMEOUT,
@@ -132,7 +132,7 @@ export const agentProfiles: Record<string, AgentProfile> = {
     systemPrompt: buildSystemPrompt('refactor', config.LLM_PROVIDER === 'anthropic'
       ? `${CLAUDE_AGENT_INSTRUCTIONS}\n\nYou are a Refactoring Agent. Identify code smells and suggest improvements.\n\nYour answer should include:\n- Code smells identified (with locations)\n- Recommended refactoring approach\n- Expected benefits\n- Risk assessment`
       : `${REACT_FORMAT_INSTRUCTIONS}\n\nYou are a Refactoring Agent. Identify code smells and suggest improvements.\n\nYour answer should include:\n- Code smells identified (with locations)\n- Recommended refactoring approach\n- Expected benefits\n- Risk assessment`),
-    allowedActions: ['search_codebase', 'recall_memory', 'get_patterns', 'get_adrs', 'search_similar'],
+    allowedActions: ['search_codebase', 'recall_memory', 'get_patterns', 'get_adrs', 'search_similar', 'search_graph', 'find_symbol', 'remember'],
     outputFormat: 'markdown',
     maxIterations: config.LLM_PROVIDER === 'anthropic' ? 12 : 8,
     timeout: config.AGENT_TIMEOUT,
@@ -145,7 +145,7 @@ export const agentProfiles: Record<string, AgentProfile> = {
     systemPrompt: buildSystemPrompt('test', config.LLM_PROVIDER === 'anthropic'
       ? `${CLAUDE_AGENT_INSTRUCTIONS}\n\nYou are a Testing Agent. Create test strategies based on project patterns.\n\nYour answer should include:\n- Test types needed (unit, integration, e2e)\n- Key test cases with descriptions\n- Mocking strategy\n- Edge cases to cover`
       : `${REACT_FORMAT_INSTRUCTIONS}\n\nYou are a Testing Agent. Create test strategies based on project patterns.\n\nYour answer should include:\n- Test types needed (unit, integration, e2e)\n- Key test cases with descriptions\n- Mocking strategy\n- Edge cases to cover`),
-    allowedActions: ['search_codebase', 'recall_memory', 'get_patterns', 'search_similar'],
+    allowedActions: ['search_codebase', 'recall_memory', 'get_patterns', 'search_similar', 'find_symbol', 'search_docs'],
     outputFormat: 'markdown',
     maxIterations: config.LLM_PROVIDER === 'anthropic' ? 10 : 6,
     timeout: config.AGENT_TIMEOUT,
@@ -265,6 +265,150 @@ const TOOL_DEFINITIONS: Record<string, Anthropic.Tool> = {
         },
       },
       required: [],
+    },
+  },
+
+  hybrid_search: {
+    name: 'hybrid_search',
+    description: 'Search the codebase using hybrid dense+sparse vectors for better recall. Combines semantic similarity with keyword matching.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        query: {
+          type: 'string',
+          description: 'Search query describing what to find',
+        },
+        limit: {
+          type: 'number',
+          description: 'Maximum number of results (default: 5)',
+        },
+      },
+      required: ['query'],
+    },
+  },
+
+  search_docs: {
+    name: 'search_docs',
+    description: 'Search project documentation (markdown, README, etc.) by semantic similarity.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        query: {
+          type: 'string',
+          description: 'What to search for in documentation',
+        },
+        limit: {
+          type: 'number',
+          description: 'Maximum number of results (default: 3)',
+        },
+      },
+      required: ['query'],
+    },
+  },
+
+  search_graph: {
+    name: 'search_graph',
+    description: 'Explore file dependency graph — find imports, dependents, and blast radius of a file.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        files: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'File paths to expand dependencies for',
+        },
+        file: {
+          type: 'string',
+          description: 'Single file path (alternative to files array)',
+        },
+        hops: {
+          type: 'number',
+          description: 'Number of hops to traverse (default: 1)',
+        },
+      },
+      required: [],
+    },
+  },
+
+  find_symbol: {
+    name: 'find_symbol',
+    description: 'Fast lookup of function, class, or type definitions by name. Returns file path and line number.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        name: {
+          type: 'string',
+          description: 'Symbol name to find (function, class, type, etc.)',
+        },
+        kind: {
+          type: 'string',
+          description: 'Filter by symbol kind: function, class, interface, type, enum',
+        },
+        limit: {
+          type: 'number',
+          description: 'Maximum number of results (default: 5)',
+        },
+      },
+      required: ['name'],
+    },
+  },
+
+  remember: {
+    name: 'remember',
+    description: 'Save a memory (insight, decision, pattern) for future recall. Persists across sessions.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        content: {
+          type: 'string',
+          description: 'Memory content to save',
+        },
+        type: {
+          type: 'string',
+          description: 'Memory type: note, decision, insight, context',
+          enum: ['note', 'decision', 'insight', 'context'],
+        },
+        tags: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Tags for categorization',
+        },
+      },
+      required: ['content'],
+    },
+  },
+
+  list_memories: {
+    name: 'list_memories',
+    description: 'List stored memories for the project, optionally filtered by type.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        type: {
+          type: 'string',
+          description: 'Filter by memory type: all, note, decision, insight, context',
+        },
+        limit: {
+          type: 'number',
+          description: 'Maximum number of results (default: 10)',
+        },
+      },
+      required: [],
+    },
+  },
+
+  explain_code: {
+    name: 'explain_code',
+    description: 'Explain code in the context of the project. Finds relevant code and provides a clear explanation.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        query: {
+          type: 'string',
+          description: 'What to explain — a function name, concept, or code snippet',
+        },
+      },
+      required: ['query'],
     },
   },
 };

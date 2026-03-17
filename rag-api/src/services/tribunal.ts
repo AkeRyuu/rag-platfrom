@@ -21,6 +21,8 @@ import { vectorStore } from './vector-store';
 import { memoryService } from './memory';
 import { workRegistry } from './work-handler';
 import { eventBus } from './event-bus';
+import { agentRuntime } from './agent-runtime';
+import { withSpan } from '../utils/tracing';
 
 // ── Interfaces ──────────────────────────────────────────────
 
@@ -33,6 +35,7 @@ export interface TribunalConfig {
   useCodeContext?: boolean;      // Fetch RAG context before debate
   autoRecord?: boolean;          // Save verdict as decision in memory
   maxBudget?: number;            // Cost guard in USD (default: 0.50)
+  deepResearch?: boolean;        // Run research agents per position before arguments
 }
 
 export interface TribunalArgument {
@@ -380,6 +383,15 @@ class TribunalService {
   }
 
   async debate(cfg: TribunalConfig & { debateId?: string }): Promise<TribunalResult> {
+    return withSpan('tribunal.debate', {
+      topic: cfg.topic.slice(0, 100),
+      positions: cfg.positions.join(','),
+      project: cfg.projectName,
+      deep_research: cfg.deepResearch || false,
+    }, async (span) => this._debate(cfg, span));
+  }
+
+  private async _debate(cfg: TribunalConfig & { debateId?: string }, span?: any): Promise<TribunalResult> {
     const id = cfg.debateId || uuidv4();
     const maxRounds = cfg.maxRounds ?? 1;
     const maxBudget = cfg.maxBudget ?? 0.50;
@@ -454,16 +466,66 @@ class TribunalService {
       eventBus.publish('tribunal:framing', { debateId: id, topic: cfg.topic, content: framingText });
       storeDebate(result);
 
+      // ── Deep Research (optional, before arguments) ──────
+      let positionResearch: Map<string, string> | undefined;
+      if (cfg.deepResearch) {
+        const researchStart = Date.now();
+        positionResearch = new Map();
+
+        // Run parallel research agents — one per position
+        const researchPromises = cfg.positions.map(async position => {
+          try {
+            const result = await agentRuntime.run({
+              projectName: cfg.projectName,
+              agentType: 'research',
+              task: `Research evidence for the position "${position}" in the context of: ${cfg.topic}. Focus on concrete data: existing code patterns, benchmarks, industry best practices, and trade-offs.`,
+              maxIterations: 5,
+              timeout: 60_000,
+            });
+            return { position, evidence: result.result || '' };
+          } catch (err: any) {
+            logger.warn('Tribunal deep research failed for position', { position, error: err.message });
+            return { position, evidence: '' };
+          }
+        });
+
+        const researchResults = await Promise.all(researchPromises);
+        let researchTokens = 0;
+        for (const { position, evidence } of researchResults) {
+          if (evidence) {
+            positionResearch.set(position, evidence);
+          }
+        }
+
+        // Budget check after research
+        const researchDurationMs = Date.now() - researchStart;
+        logger.info('Tribunal deep research completed', {
+          id, positions: cfg.positions, durationMs: researchDurationMs,
+        });
+
+        if (estimateCost(result.cost.totalTokens) > maxBudget) {
+          logger.warn('Tribunal budget exceeded after deep research', { id });
+        }
+      }
+
       // ── Phase 2: Initial Arguments (parallel) ───────────
       const argsStart = Date.now();
-      const argPromises = cfg.positions.map(position => this.runAdvocate(
-        position,
-        cfg.topic,
-        framingText,
-        ragContext,
-        undefined,  // no opponent args yet
-        0,
-      ));
+      const argPromises = cfg.positions.map(position => {
+        // Inject research evidence if available
+        const researchEvidence = positionResearch?.get(position);
+        const enrichedRagContext = researchEvidence
+          ? `${ragContext || ''}\n\n## Research Evidence\n${researchEvidence}`
+          : ragContext;
+
+        return this.runAdvocate(
+          position,
+          cfg.topic,
+          framingText,
+          enrichedRagContext,
+          undefined,  // no opponent args yet
+          0,
+        );
+      });
 
       const initialArgs = await Promise.all(argPromises);
       let argsTokens = 0;
@@ -606,6 +668,14 @@ class TribunalService {
         cost: result.cost.estimatedUsd,
         durationMs: result.durationMs,
       });
+
+      if (span?.setAttribute) {
+        span.setAttribute('verdict', result.verdict.recommendation);
+        span.setAttribute('confidence', result.verdict.confidence);
+        span.setAttribute('total_tokens', result.cost.totalTokens);
+        span.setAttribute('cost_usd', result.cost.estimatedUsd);
+        span.setAttribute('duration_ms', result.durationMs);
+      }
 
       logger.info('Tribunal debate completed', {
         id,

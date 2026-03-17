@@ -14,6 +14,8 @@ import { embeddingService } from './embedding';
 import { vectorStore } from './vector-store';
 import { memoryService } from './memory';
 import { llm } from './llm';
+import { graphStore } from './graph-store';
+import { symbolIndex } from './symbol-index';
 import { workRegistry } from './work-handler';
 import { getAgentProfile, listAgentTypes, type AgentProfile, getToolDefinitions } from './agent-profiles';
 import {
@@ -24,6 +26,7 @@ import {
   agentTokensUsed,
 } from '../utils/metrics';
 import { factExtractor } from './fact-extractor';
+import { withSpan } from '../utils/tracing';
 
 // ============================================
 // Interfaces
@@ -78,6 +81,21 @@ class AgentRuntime {
     maxIterations?: number;
     timeout?: number;
   }): Promise<AgentTask> {
+    return withSpan('agent_runtime.run', {
+      agent_type: options.agentType,
+      project: options.projectName,
+      task: options.task.slice(0, 100),
+    }, async (span) => this._run(options, span));
+  }
+
+  private async _run(options: {
+    projectName: string;
+    agentType: string;
+    task: string;
+    context?: string;
+    maxIterations?: number;
+    timeout?: number;
+  }, span?: any): Promise<AgentTask> {
     const { projectName, agentType, task, context } = options;
 
     const profile = getAgentProfile(agentType);
@@ -152,6 +170,13 @@ class AgentRuntime {
       agentDuration.observe({ project: projectName, agent_type: agentType }, durationMs / 1000);
       agentIterations.observe({ project: projectName, agent_type: agentType }, agentTask.usage.iterations);
       agentTokensUsed.inc({ project: projectName, agent_type: agentType, type: 'total' }, agentTask.usage.totalTokens);
+
+      if (span?.setAttribute) {
+        span.setAttribute('status', agentTask.status);
+        span.setAttribute('iterations', agentTask.usage.iterations);
+        span.setAttribute('tool_calls', agentTask.usage.toolCalls);
+        span.setAttribute('duration_ms', durationMs);
+      }
     }
 
     return agentTask;
@@ -597,6 +622,125 @@ class AgentRuntime {
           return `[${i + 1}] ${file} (score: ${r.score.toFixed(3)})\n${content}`;
         })
         .join('\n\n');
+    },
+
+    // ── Retrieval ──────────────────────────────────────────
+
+    hybrid_search: async (input, projectName) => {
+      const query = String(input.query || '');
+      const limit = Number(input.limit) || 5;
+      const collection = `${projectName}_codebase`;
+
+      let results;
+      if (config.SPARSE_VECTORS_ENABLED) {
+        const { dense, sparse } = await embeddingService.embedFull(query);
+        results = await vectorStore.searchHybridNative(collection, dense, sparse, limit);
+      } else {
+        const embedding = await embeddingService.embed(query);
+        results = await vectorStore.search(collection, embedding, limit);
+      }
+
+      if (results.length === 0) return 'No results found.';
+      return results
+        .map((r, i) => {
+          const file = r.payload.file || 'unknown';
+          const content = String(r.payload.content || '').slice(0, 500);
+          return `[${i + 1}] ${file} (score: ${r.score.toFixed(3)})\n${content}`;
+        })
+        .join('\n\n');
+    },
+
+    search_docs: async (input, projectName) => {
+      const query = String(input.query || '');
+      const limit = Number(input.limit) || 3;
+      const collection = `${projectName}_docs`;
+      try {
+        const embedding = await embeddingService.embed(query);
+        const results = await vectorStore.search(collection, embedding, limit);
+        if (results.length === 0) return 'No documentation found.';
+        return results
+          .map((r, i) => {
+            const file = r.payload.file || 'unknown';
+            const content = String(r.payload.content || '').slice(0, 500);
+            return `[${i + 1}] ${file} (score: ${r.score.toFixed(3)})\n${content}`;
+          })
+          .join('\n\n');
+      } catch (e: any) {
+        if (e.status === 404) return 'No docs collection found.';
+        throw e;
+      }
+    },
+
+    // ── Graph ──────────────────────────────────────────────
+
+    search_graph: async (input, projectName) => {
+      const files = Array.isArray(input.files)
+        ? (input.files as string[])
+        : [String(input.file || input.query || '')];
+      const hops = Number(input.hops) || 1;
+      const expanded = await graphStore.expand(projectName, files.slice(0, 5), hops);
+      if (expanded.length === 0) return 'No graph dependencies found.';
+      const deps = expanded.filter(f => !files.includes(f));
+      return `Files: ${files.join(', ')}\nDependencies (${deps.length}):\n${deps.map(f => `  - ${f}`).join('\n')}`;
+    },
+
+    find_symbol: async (input, projectName) => {
+      const name = String(input.name || input.query || '');
+      const kind = input.kind ? String(input.kind) : undefined;
+      const limit = Number(input.limit) || 5;
+      const results = await symbolIndex.findSymbol(projectName, name, kind, limit);
+      if (results.length === 0) return `Symbol "${name}" not found.`;
+      return results
+        .map((r, i) => `[${i + 1}] ${r.kind} ${r.name} in ${r.file}:${r.startLine || '?'}`)
+        .join('\n');
+    },
+
+    // ── Memory ─────────────────────────────────────────────
+
+    remember: async (input, projectName) => {
+      const content = String(input.content || '');
+      const type = String(input.type || 'note');
+      const tags = Array.isArray(input.tags) ? (input.tags as string[]) : [];
+      await memoryService.remember({
+        projectName,
+        content,
+        type: type as any,
+        tags,
+      });
+      return `Remembered: ${content.slice(0, 100)}`;
+    },
+
+    list_memories: async (input, projectName) => {
+      const type = input.type ? String(input.type) : undefined;
+      const limit = Number(input.limit) || 10;
+      const results = await memoryService.list({ projectName, type: type as any, limit });
+      if (results.length === 0) return 'No memories found.';
+      return results
+        .map((m: any, i: number) => `[${i + 1}] [${m.type}] ${String(m.content).slice(0, 150)}`)
+        .join('\n');
+    },
+
+    // ── Analysis ───────────────────────────────────────────
+
+    explain_code: async (input, projectName) => {
+      const query = String(input.query || input.code || '');
+      // Search for relevant code first
+      const embedding = await embeddingService.embed(query);
+      const results = await vectorStore.search(`${projectName}_codebase`, embedding, 3);
+      const codeContext = results
+        .map(r => `File: ${r.payload.file}\n${String(r.payload.content || '').slice(0, 800)}`)
+        .join('\n\n---\n\n');
+
+      const explanation = await llm.complete(
+        `Explain this code in the context of the project:\n\nQuery: ${query}\n\n${codeContext}`,
+        {
+          systemPrompt: 'You are a code explanation assistant. Be concise and focus on the key concepts.',
+          maxTokens: 1024,
+          temperature: 0.3,
+          think: false,
+        }
+      );
+      return explanation.text;
     },
   };
 

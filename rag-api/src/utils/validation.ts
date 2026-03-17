@@ -428,6 +428,7 @@ export const tribunalDebateSchema = z.object({
   useCodeContext: z.boolean().default(false),
   autoRecord: z.boolean().default(false),
   maxBudget: z.number().min(0.01).max(5).default(0.50),
+  deepResearch: z.boolean().default(false),
 });
 
 export type TribunalDebateInput = z.infer<typeof tribunalDebateSchema>;
@@ -472,6 +473,19 @@ export type AutonomousAgentInput = z.infer<typeof autonomousAgentSchema>;
 export const stopAutonomousAgentSchema = z.object({
   agentId: z.string().uuid(),
 });
+
+export const workflowSchema = z.object({
+  projectName: projectNameSchema.optional(),
+  projectPath: z.string().min(1).max(1000),
+  steps: z.array(z.object({
+    id: z.string().min(1).max(100),
+    type: z.enum(['smart_dispatch', 'agent', 'tribunal', 'claude_agent']),
+    config: z.record(z.string(), z.unknown()),
+    parallel: z.string().max(50).optional(),
+  })).min(1).max(20),
+});
+
+export type WorkflowInput = z.infer<typeof workflowSchema>;
 
 // ============================================
 // Context Pack Schemas
