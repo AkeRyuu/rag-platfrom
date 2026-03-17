@@ -1,0 +1,32 @@
+# Development overrides
+# Usage: docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+
+services:
+  rag-api:
+    build:
+      context: ../rag-api
+      dockerfile: Dockerfile
+    environment:
+      - LOG_LEVEL=debug
+      - NODE_ENV=development
+    volumes:
+      - ../rag-api/src:/app/src:ro
+    # Lower resource limits for dev
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+
+  ollama:
+    deploy:
+      resources:
+        limits:
+          memory: 16G
+
+  # No GPU reservation in dev (allows CPU-only dev machines)
+  # Override GPU config by uncommenting below:
+  # ollama:
+  #   deploy:
+  #     resources:
+  #       reservations:
+  #         devices: []

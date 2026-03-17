@@ -13,6 +13,7 @@ import { llm } from './llm';
 import { memoryService, MemoryType } from './memory';
 import { memoryGovernance } from './memory-governance';
 import { logger } from '../utils/logger';
+import { parseLLMOutput, conversationAnalysisSchema } from '../utils/llm-output';
 
 export interface ExtractedLearning {
   type: MemoryType;
@@ -100,17 +101,14 @@ class ConversationAnalyzerService {
         format: 'json',
       });
 
-      let analysis: ConversationAnalysis;
-      try {
-        analysis = JSON.parse(result.text);
-      } catch {
-        logger.warn('Failed to parse analysis result, using defaults');
-        analysis = {
-          learnings: [],
-          entities: { files: [], functions: [], concepts: [] },
-          summary: result.text.slice(0, 200),
-        };
-      }
+      const defaultAnalysis: ConversationAnalysis = {
+        learnings: [],
+        entities: { files: [], functions: [], concepts: [] },
+        summary: result.text.slice(0, 200),
+      };
+      const { data: analysis } = parseLLMOutput(
+        result.text, conversationAnalysisSchema, defaultAnalysis, 'conversation-analysis'
+      ) as { data: ConversationAnalysis; ok: boolean };
 
       // Filter by confidence
       analysis.learnings = analysis.learnings.filter(l => l.confidence >= minConfidence);

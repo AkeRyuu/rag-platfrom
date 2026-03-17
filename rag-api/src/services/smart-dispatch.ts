@@ -13,6 +13,7 @@ import { memoryService } from './memory';
 import { graphStore } from './graph-store';
 import { symbolIndex } from './symbol-index';
 import { llm } from './llm';
+import { parseLLMOutput, routingSchema } from '../utils/llm-output';
 import { logger } from '../utils/logger';
 import config from '../config';
 
@@ -126,9 +127,9 @@ class SmartDispatchService {
       format: 'json',
     });
 
-    const parsed = JSON.parse(result.text);
+    const { data } = parseLLMOutput(result.text, routingSchema, { lookups: ['code_search'], reasoning: 'fallback' }, 'smart-dispatch');
     const validLookups: LookupType[] = ['memory', 'code_search', 'patterns', 'adrs', 'graph', 'docs', 'symbols'];
-    const lookups = (parsed.lookups || []).filter((l: string) => validLookups.includes(l as LookupType)) as LookupType[];
+    const lookups = data.lookups.filter((l: string) => validLookups.includes(l as LookupType)) as LookupType[];
 
     // Ensure at least code_search is always included
     if (lookups.length === 0) {
@@ -137,7 +138,7 @@ class SmartDispatchService {
 
     return {
       lookups,
-      reasoning: parsed.reasoning || 'LLM routing',
+      reasoning: data.reasoning || 'LLM routing',
     };
   }
 

@@ -78,6 +78,94 @@ export function createAgentTools(projectName: string): ToolSpec[] {
       },
     },
     {
+      name: "tribunal_debate",
+      description: `Run an adversarial debate on a topic for ${projectName}. Multiple advocates argue positions, a judge renders a verdict. Use for architecture decisions, tech choices, or code approach trade-offs.`,
+      schema: z.object({
+        topic: z.string().describe("The debate topic (e.g., 'Should we use REST or gRPC for the new API?')"),
+        positions: z.array(z.string()).min(2).max(4).describe("Positions to debate (2-4 options, e.g., ['REST', 'gRPC'])"),
+        context: z.string().optional().describe("Additional context for the debate"),
+        maxRounds: z.coerce.number().optional().describe("Number of rebuttal rounds (default: 1, max: 3)"),
+        useCodeContext: z.boolean().optional().describe("Fetch relevant code, ADRs, and patterns as evidence (default: false)"),
+        autoRecord: z.boolean().optional().describe("Save verdict as a decision in project memory (default: false)"),
+      }),
+      annotations: TOOL_ANNOTATIONS["tribunal_debate"] || { priority: 0.4, readOnlyHint: true },
+      handler: async (
+        args: Record<string, unknown>,
+        ctx: ToolContext
+      ): Promise<string> => {
+        const { topic, positions, context, maxRounds, useCodeContext, autoRecord } = args as {
+          topic: string;
+          positions: string[];
+          context?: string;
+          maxRounds?: number;
+          useCodeContext?: boolean;
+          autoRecord?: boolean;
+        };
+
+        const response = await ctx.api.post("/api/tribunal/debate", {
+          projectName: ctx.projectName,
+          topic,
+          positions,
+          context,
+          maxRounds,
+          useCodeContext,
+          autoRecord,
+        });
+
+        const data = response.data;
+
+        // Format result as markdown
+        let result = `## Tribunal Debate: ${data.topic}\n`;
+        result += `**Status:** ${data.status}`;
+        result += ` | **Duration:** ${Math.round(data.durationMs / 1000)}s`;
+        result += ` | **Cost:** ~$${data.cost?.estimatedUsd?.toFixed(3) || '?'}\n\n`;
+
+        // Phases summary
+        if (data.phases) {
+          result += `### Phases\n`;
+          for (const phase of data.phases) {
+            result += `- **${phase.name}**: ${Math.round(phase.durationMs / 1000)}s, ${phase.tokens} tokens\n`;
+          }
+          result += `\n`;
+        }
+
+        // Arguments
+        if (data.arguments && data.arguments.length > 0) {
+          result += `### Arguments\n`;
+          for (const arg of data.arguments) {
+            const label = arg.round === 0 ? 'Initial' : `Rebuttal R${arg.round}`;
+            result += `#### ${arg.position} (${label})\n${arg.content}\n\n`;
+          }
+        }
+
+        // Verdict
+        if (data.verdict) {
+          result += `### Verdict\n`;
+          result += `**Recommendation:** ${data.verdict.recommendation}\n`;
+          result += `**Confidence:** ${data.verdict.confidence}\n\n`;
+
+          if (data.verdict.scores) {
+            result += `**Scores:**\n`;
+            for (const s of data.verdict.scores) {
+              result += `- ${s.position}: ${s.score}/10\n`;
+            }
+            result += `\n`;
+          }
+
+          result += `**Reasoning:**\n${data.verdict.reasoning}\n\n`;
+          result += `**Trade-offs:**\n${data.verdict.tradeoffs}\n\n`;
+          result += `**Dissent:**\n${data.verdict.dissent}\n\n`;
+          result += `**Conditions:**\n${data.verdict.conditions}\n`;
+        }
+
+        if (data.error) {
+          result += `\n**Error:** ${data.error}\n`;
+        }
+
+        return result;
+      },
+    },
+    {
       name: "get_agent_types",
       description: `List available agent types for ${projectName} with descriptions.`,
       schema: z.object({}),

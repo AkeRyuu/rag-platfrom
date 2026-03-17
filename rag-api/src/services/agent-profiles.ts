@@ -7,8 +7,11 @@
  * Also provides Claude tool definitions for native tool_use mode.
  */
 
+import * as fs from 'fs';
+import * as path from 'path';
 import Anthropic from '@anthropic-ai/sdk';
 import config from '../config';
+import { logger } from '../utils/logger';
 
 export interface AgentProfile {
   name: string;
@@ -19,6 +22,35 @@ export interface AgentProfile {
   maxIterations: number;
   timeout: number;
   temperature: number;
+}
+
+// ── Template Loading ──────────────────────────────────────────
+
+const TEMPLATES_DIR = path.resolve(__dirname, '../../templates/agents');
+
+function loadTemplate(name: string): string | null {
+  try {
+    const filePath = path.join(TEMPLATES_DIR, `${name}.md`);
+    if (fs.existsSync(filePath)) {
+      return fs.readFileSync(filePath, 'utf-8').trim();
+    }
+  } catch (error: any) {
+    logger.debug(`Failed to load agent template: ${name}`, { error: error.message });
+  }
+  return null;
+}
+
+/** Build system prompt: base instructions + template (if available) + inline fallback */
+function buildSystemPrompt(agentName: string, inlinePrompt: string): string {
+  const template = loadTemplate(agentName);
+  const base = config.LLM_PROVIDER === 'anthropic'
+    ? CLAUDE_AGENT_INSTRUCTIONS
+    : REACT_FORMAT_INSTRUCTIONS;
+
+  if (template) {
+    return `${base}\n\n${template}`;
+  }
+  return inlinePrompt;
 }
 
 const REACT_FORMAT_INSTRUCTIONS = `You are an AI agent using the ReAct (Reasoning + Acting) framework.
@@ -58,23 +90,9 @@ export const agentProfiles: Record<string, AgentProfile> = {
   research: {
     name: 'research',
     description: 'Investigates the codebase, finds patterns, and synthesizes analysis. Best for understanding how things work.',
-    systemPrompt: config.LLM_PROVIDER === 'anthropic'
-      ? `${CLAUDE_AGENT_INSTRUCTIONS}
-
-You are a Research Agent. Thoroughly investigate the codebase to answer questions.
-
-Your answer should include:
-- Key findings with file references
-- Relevant patterns or conventions discovered
-- Connections between different parts of the codebase`
-      : `${REACT_FORMAT_INSTRUCTIONS}
-
-You are a Research Agent. Thoroughly investigate the codebase to answer questions.
-
-Your answer should include:
-- Key findings with file references
-- Relevant patterns or conventions discovered
-- Connections between different parts of the codebase`,
+    systemPrompt: buildSystemPrompt('research', config.LLM_PROVIDER === 'anthropic'
+      ? `${CLAUDE_AGENT_INSTRUCTIONS}\n\nYou are a Research Agent. Thoroughly investigate the codebase to answer questions.\n\nYour answer should include:\n- Key findings with file references\n- Relevant patterns or conventions discovered\n- Connections between different parts of the codebase`
+      : `${REACT_FORMAT_INSTRUCTIONS}\n\nYou are a Research Agent. Thoroughly investigate the codebase to answer questions.\n\nYour answer should include:\n- Key findings with file references\n- Relevant patterns or conventions discovered\n- Connections between different parts of the codebase`),
     allowedActions: ['search_codebase', 'recall_memory', 'get_patterns', 'get_adrs', 'search_similar'],
     outputFormat: 'markdown',
     maxIterations: config.LLM_PROVIDER === 'anthropic' ? 15 : 10,
@@ -85,25 +103,9 @@ Your answer should include:
   review: {
     name: 'review',
     description: 'Reviews code against project patterns, ADRs, and best practices. Identifies issues and improvements.',
-    systemPrompt: config.LLM_PROVIDER === 'anthropic'
-      ? `${CLAUDE_AGENT_INSTRUCTIONS}
-
-You are a Code Review Agent. Review code against project standards and conventions.
-
-Your answer should include:
-- Pattern compliance assessment
-- Specific issues found (with severity)
-- Suggested improvements
-- Positive aspects of the code`
-      : `${REACT_FORMAT_INSTRUCTIONS}
-
-You are a Code Review Agent. Review code against project standards and conventions.
-
-Your answer should include:
-- Pattern compliance assessment
-- Specific issues found (with severity)
-- Suggested improvements
-- Positive aspects of the code`,
+    systemPrompt: buildSystemPrompt('review', config.LLM_PROVIDER === 'anthropic'
+      ? `${CLAUDE_AGENT_INSTRUCTIONS}\n\nYou are a Code Review Agent. Review code against project standards and conventions.\n\nYour answer should include:\n- Pattern compliance assessment\n- Specific issues found (with severity)\n- Suggested improvements\n- Positive aspects of the code`
+      : `${REACT_FORMAT_INSTRUCTIONS}\n\nYou are a Code Review Agent. Review code against project standards and conventions.\n\nYour answer should include:\n- Pattern compliance assessment\n- Specific issues found (with severity)\n- Suggested improvements\n- Positive aspects of the code`),
     allowedActions: ['recall_memory', 'get_patterns', 'get_adrs', 'search_codebase', 'search_similar'],
     outputFormat: 'markdown',
     maxIterations: config.LLM_PROVIDER === 'anthropic' ? 12 : 6,
@@ -114,25 +116,9 @@ Your answer should include:
   documentation: {
     name: 'documentation',
     description: 'Analyzes code and generates documentation. Understands context through codebase exploration.',
-    systemPrompt: config.LLM_PROVIDER === 'anthropic'
-      ? `${CLAUDE_AGENT_INSTRUCTIONS}
-
-You are a Documentation Agent. Analyze code and produce clear documentation.
-
-Your answer should include:
-- Overview of what the code does
-- Key interfaces/types explained
-- Usage examples where applicable
-- Dependencies and relationships`
-      : `${REACT_FORMAT_INSTRUCTIONS}
-
-You are a Documentation Agent. Analyze code and produce clear documentation.
-
-Your answer should include:
-- Overview of what the code does
-- Key interfaces/types explained
-- Usage examples where applicable
-- Dependencies and relationships`,
+    systemPrompt: buildSystemPrompt('documentation', config.LLM_PROVIDER === 'anthropic'
+      ? `${CLAUDE_AGENT_INSTRUCTIONS}\n\nYou are a Documentation Agent. Analyze code and produce clear documentation.\n\nYour answer should include:\n- Overview of what the code does\n- Key interfaces/types explained\n- Usage examples where applicable\n- Dependencies and relationships`
+      : `${REACT_FORMAT_INSTRUCTIONS}\n\nYou are a Documentation Agent. Analyze code and produce clear documentation.\n\nYour answer should include:\n- Overview of what the code does\n- Key interfaces/types explained\n- Usage examples where applicable\n- Dependencies and relationships`),
     allowedActions: ['search_codebase', 'recall_memory', 'get_patterns', 'search_similar'],
     outputFormat: 'markdown',
     maxIterations: config.LLM_PROVIDER === 'anthropic' ? 10 : 6,
@@ -143,25 +129,9 @@ Your answer should include:
   refactor: {
     name: 'refactor',
     description: 'Finds code smells and suggests refactoring based on project patterns and best practices.',
-    systemPrompt: config.LLM_PROVIDER === 'anthropic'
-      ? `${CLAUDE_AGENT_INSTRUCTIONS}
-
-You are a Refactoring Agent. Identify code smells and suggest improvements.
-
-Your answer should include:
-- Code smells identified (with locations)
-- Recommended refactoring approach
-- Expected benefits
-- Risk assessment`
-      : `${REACT_FORMAT_INSTRUCTIONS}
-
-You are a Refactoring Agent. Identify code smells and suggest improvements.
-
-Your answer should include:
-- Code smells identified (with locations)
-- Recommended refactoring approach
-- Expected benefits
-- Risk assessment`,
+    systemPrompt: buildSystemPrompt('refactor', config.LLM_PROVIDER === 'anthropic'
+      ? `${CLAUDE_AGENT_INSTRUCTIONS}\n\nYou are a Refactoring Agent. Identify code smells and suggest improvements.\n\nYour answer should include:\n- Code smells identified (with locations)\n- Recommended refactoring approach\n- Expected benefits\n- Risk assessment`
+      : `${REACT_FORMAT_INSTRUCTIONS}\n\nYou are a Refactoring Agent. Identify code smells and suggest improvements.\n\nYour answer should include:\n- Code smells identified (with locations)\n- Recommended refactoring approach\n- Expected benefits\n- Risk assessment`),
     allowedActions: ['search_codebase', 'recall_memory', 'get_patterns', 'get_adrs', 'search_similar'],
     outputFormat: 'markdown',
     maxIterations: config.LLM_PROVIDER === 'anthropic' ? 12 : 8,
@@ -172,25 +142,9 @@ Your answer should include:
   test: {
     name: 'test',
     description: 'Generates test strategies based on codebase patterns. Identifies what and how to test.',
-    systemPrompt: config.LLM_PROVIDER === 'anthropic'
-      ? `${CLAUDE_AGENT_INSTRUCTIONS}
-
-You are a Testing Agent. Create test strategies based on project patterns.
-
-Your answer should include:
-- Test types needed (unit, integration, e2e)
-- Key test cases with descriptions
-- Mocking strategy
-- Edge cases to cover`
-      : `${REACT_FORMAT_INSTRUCTIONS}
-
-You are a Testing Agent. Create test strategies based on project patterns.
-
-Your answer should include:
-- Test types needed (unit, integration, e2e)
-- Key test cases with descriptions
-- Mocking strategy
-- Edge cases to cover`,
+    systemPrompt: buildSystemPrompt('test', config.LLM_PROVIDER === 'anthropic'
+      ? `${CLAUDE_AGENT_INSTRUCTIONS}\n\nYou are a Testing Agent. Create test strategies based on project patterns.\n\nYour answer should include:\n- Test types needed (unit, integration, e2e)\n- Key test cases with descriptions\n- Mocking strategy\n- Edge cases to cover`
+      : `${REACT_FORMAT_INSTRUCTIONS}\n\nYou are a Testing Agent. Create test strategies based on project patterns.\n\nYour answer should include:\n- Test types needed (unit, integration, e2e)\n- Key test cases with descriptions\n- Mocking strategy\n- Edge cases to cover`),
     allowedActions: ['search_codebase', 'recall_memory', 'get_patterns', 'search_similar'],
     outputFormat: 'markdown',
     maxIterations: config.LLM_PROVIDER === 'anthropic' ? 10 : 6,

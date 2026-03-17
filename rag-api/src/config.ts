@@ -49,6 +49,10 @@ export interface Config {
   SEPARATE_COLLECTIONS: boolean;
   LEGACY_CODEBASE_COLLECTION: boolean;
 
+  // Indexer Parallelism
+  INDEXER_FILE_CONCURRENCY: number;
+  INDEXER_EMBED_CONCURRENCY: number;
+
   // Sparse Vectors
   SPARSE_VECTORS_ENABLED: boolean;
 
@@ -62,6 +66,12 @@ export interface Config {
   MEMORY_COMPACTION_THRESHOLD: number;
   MEMORY_COMPACTION_CYCLE_DAYS: number;
 
+  // Tribunal
+  TRIBUNAL_MAX_ROUNDS: number;
+  TRIBUNAL_MAX_BUDGET: number;
+  TRIBUNAL_JUDGE_COMPLEXITY: 'utility' | 'standard' | 'complex';
+  TRIBUNAL_ADVOCATE_COMPLEXITY: 'utility' | 'standard' | 'complex';
+
   // Logging
   LOG_LEVEL: string;
 }
@@ -69,7 +79,7 @@ export interface Config {
 const config: Config = {
   // Server
   API_PORT: parseInt(process.env.API_PORT || '3100', 10),
-  API_HOST: process.env.API_HOST || '0.0.0.0',
+  API_HOST: process.env.API_HOST || '127.0.0.1',
 
   // Qdrant
   QDRANT_URL: process.env.QDRANT_URL || 'http://localhost:6333',
@@ -110,6 +120,10 @@ const config: Config = {
   SEPARATE_COLLECTIONS: process.env.SEPARATE_COLLECTIONS !== 'false',
   LEGACY_CODEBASE_COLLECTION: process.env.LEGACY_CODEBASE_COLLECTION !== 'false',
 
+  // Indexer Parallelism
+  INDEXER_FILE_CONCURRENCY: parseInt(process.env.INDEXER_FILE_CONCURRENCY || '5', 10),
+  INDEXER_EMBED_CONCURRENCY: parseInt(process.env.INDEXER_EMBED_CONCURRENCY || '3', 10),
+
   // Sparse Vectors
   SPARSE_VECTORS_ENABLED: process.env.SPARSE_VECTORS_ENABLED === 'true',
 
@@ -122,6 +136,12 @@ const config: Config = {
   MEMORY_DECAY_MAX: parseFloat(process.env.MEMORY_DECAY_MAX || '0.50'),
   MEMORY_COMPACTION_THRESHOLD: parseFloat(process.env.MEMORY_COMPACTION_THRESHOLD || '0.85'),
   MEMORY_COMPACTION_CYCLE_DAYS: parseInt(process.env.MEMORY_COMPACTION_CYCLE_DAYS || '90', 10),
+
+  // Tribunal
+  TRIBUNAL_MAX_ROUNDS: parseInt(process.env.TRIBUNAL_MAX_ROUNDS || '1', 10),
+  TRIBUNAL_MAX_BUDGET: parseFloat(process.env.TRIBUNAL_MAX_BUDGET || '0.50'),
+  TRIBUNAL_JUDGE_COMPLEXITY: (process.env.TRIBUNAL_JUDGE_COMPLEXITY || 'complex') as Config['TRIBUNAL_JUDGE_COMPLEXITY'],
+  TRIBUNAL_ADVOCATE_COMPLEXITY: (process.env.TRIBUNAL_ADVOCATE_COMPLEXITY || 'complex') as Config['TRIBUNAL_ADVOCATE_COMPLEXITY'],
 
   // Logging
   LOG_LEVEL: process.env.LOG_LEVEL || 'info',

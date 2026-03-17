@@ -13,11 +13,14 @@ import { cacheService } from './cache';
 import { logger } from '../utils/logger';
 import { parserRegistry, ParsedChunk } from './parsers/index';
 import config from '../config';
+import { workRegistry } from './work-handler';
 import { indexingChunksByType } from '../utils/metrics';
 import { astParser } from './parsers/ast-parser';
 import { graphStore } from './graph-store';
 import { symbolIndex } from './symbol-index';
 import { buildAnchorString } from './anchor';
+import pLimitModule from 'p-limit';
+const pLimit = (pLimitModule as any).default || pLimitModule;
 
 export interface IndexOptions {
   projectName: string;
@@ -311,6 +314,14 @@ export async function indexProject(options: IndexOptions): Promise<IndexStats> {
     startedAt: new Date(),
   });
 
+  // Register in work registry
+  const workHandle = workRegistry.register({
+    id: `index-${projectName}-${Date.now()}`,
+    type: 'indexing',
+    projectName,
+    description: `Index codebase: ${projectPath}`,
+  });
+
   logger.info(`Starting indexing for project: ${projectName}`, {
     path: projectPath,
     incremental: incremental && !force,
@@ -411,101 +422,120 @@ export async function indexProject(options: IndexOptions): Promise<IndexStats> {
       const allChunks: ChunkInfo[] = [];
       const processedFiles: string[] = [];
       const gitCommit = getGitCommit(projectPath);
-      for (const filePath of fileBatch) {
-        const relativePath = path.relative(projectPath, filePath);
-        try {
-          const content = fs.readFileSync(filePath, 'utf-8');
-          const language = getLanguage(filePath);
-          const hash = computeFileHash(content);
 
-          // Delete existing chunks for this file (if incremental update)
-          if (incremental && existingIndex[relativePath]) {
-            await vectorStore.deleteByFilter(collectionName, {
-              must: [{ key: 'file', match: { value: relativePath } }],
-            });
-          }
+      // Process files in parallel with concurrency limit
+      const fileLimit = pLimit(config.INDEXER_FILE_CONCURRENCY);
+      const fileResults = await Promise.all(
+        fileBatch.map(filePath => fileLimit(async () => {
+          const relativePath = path.relative(projectPath, filePath);
+          try {
+            const content = fs.readFileSync(filePath, 'utf-8');
+            const language = getLanguage(filePath);
+            const hash = computeFileHash(content);
 
-          // Use parser registry for structured chunking
-          const parser = parserRegistry.getParser(filePath);
-          let parsedChunks: ParsedChunk[];
+            // Delete existing chunks for this file (if incremental update)
+            if (incremental && existingIndex[relativePath]) {
+              await vectorStore.deleteByFilter(collectionName, {
+                must: [{ key: 'file', match: { value: relativePath } }],
+              });
+            }
 
-          if (parser) {
-            parsedChunks = parser.parse(content, filePath);
-          } else {
-            // Fallback to existing chunkCode for unknown files
-            const rawChunks = chunkCode(content);
-            parsedChunks = rawChunks.filter(c => c.trim().length >= 10).map((c, idx) => ({
-              content: c,
-              startLine: 0,
-              endLine: 0,
-              language,
-              type: 'code' as const,
-            }));
-          }
+            // Use parser registry for structured chunking
+            const parser = parserRegistry.getParser(filePath);
+            let parsedChunks: ParsedChunk[];
 
-          const validChunks = parsedChunks.filter(c => c.content.trim().length >= 10);
-          const fileType = parserRegistry.classifyFile(filePath);
+            if (parser) {
+              parsedChunks = parser.parse(content, filePath);
+            } else {
+              // Fallback to existing chunkCode for unknown files
+              const rawChunks = chunkCode(content);
+              parsedChunks = rawChunks.filter(c => c.trim().length >= 10).map((c, idx) => ({
+                content: c,
+                startLine: 0,
+                endLine: 0,
+                language,
+                type: 'code' as const,
+              }));
+            }
 
-          for (let chunkIndex = 0; chunkIndex < validChunks.length; chunkIndex++) {
-            const pc = validChunks[chunkIndex];
-            allChunks.push({
-              text: pc.content,
+            const validChunks = parsedChunks.filter(c => c.content.trim().length >= 10);
+            const fileType = parserRegistry.classifyFile(filePath);
+
+            const chunks: ChunkInfo[] = [];
+            for (let chunkIndex = 0; chunkIndex < validChunks.length; chunkIndex++) {
+              const pc = validChunks[chunkIndex];
+              chunks.push({
+                text: pc.content,
+                relativePath,
+                language: pc.language || language,
+                chunkIndex,
+                totalChunks: validChunks.length,
+                hash,
+                startLine: pc.startLine,
+                endLine: pc.endLine,
+                symbols: pc.symbols,
+                imports: pc.imports,
+                chunkType: fileType,
+                layer: detectLayer(relativePath),
+                service: extractServiceName(pc.symbols),
+                gitCommit,
+              });
+
+              indexingChunksByType.inc({ project: projectName, chunk_type: fileType });
+            }
+
+            // Extract and index graph edges
+            try {
+              const edges = astParser.extractEdges(content, relativePath);
+              if (edges.length > 0) {
+                await graphStore.indexFileEdges(projectName, relativePath, edges);
+              }
+            } catch (edgeError: any) {
+              logger.debug(`Edge extraction failed for ${relativePath}`, { error: edgeError.message });
+            }
+
+            // Index symbols for cross-file lookup
+            try {
+              const allSymbols = validChunks.flatMap(c => c.symbols || []);
+              if (allSymbols.length > 0) {
+                await symbolIndex.clearFileSymbols(projectName, relativePath);
+                await symbolIndex.indexFileSymbols(
+                  projectName, relativePath, content,
+                  [...new Set(allSymbols)],
+                  validChunks[0]?.startLine || 1,
+                  validChunks[validChunks.length - 1]?.endLine || 1
+                );
+              }
+            } catch (symError: any) {
+              logger.debug(`Symbol indexing failed for ${relativePath}`, { error: symError.message });
+            }
+
+            return {
+              ok: true as const,
               relativePath,
-              language: pc.language || language,
-              chunkIndex,
-              totalChunks: validChunks.length,
               hash,
-              startLine: pc.startLine,
-              endLine: pc.endLine,
-              symbols: pc.symbols,
-              imports: pc.imports,
-              chunkType: fileType,
-              layer: detectLayer(relativePath),
-              service: extractServiceName(pc.symbols),
-              gitCommit,
-            });
-
-            indexingChunksByType.inc({ project: projectName, chunk_type: fileType });
+              chunkCount: validChunks.length,
+              chunks,
+            };
+          } catch (error) {
+            logger.warn(`Failed to process file: ${filePath}`, { error });
+            return { ok: false as const, relativePath };
           }
+        }))
+      );
 
-          // Update hash index
-          newIndex[relativePath] = {
-            hash,
+      // Collect results from parallel file processing
+      for (const result of fileResults) {
+        if (result.ok) {
+          allChunks.push(...result.chunks);
+          processedFiles.push(result.relativePath);
+          newIndex[result.relativePath] = {
+            hash: result.hash,
             indexedAt: new Date().toISOString(),
-            chunkCount: validChunks.length,
+            chunkCount: result.chunkCount,
           };
-
-          processedFiles.push(relativePath);
-
-          // Extract and index graph edges
-          try {
-            const edges = astParser.extractEdges(content, relativePath);
-            if (edges.length > 0) {
-              await graphStore.indexFileEdges(projectName, relativePath, edges);
-            }
-          } catch (edgeError: any) {
-            logger.debug(`Edge extraction failed for ${relativePath}`, { error: edgeError.message });
-          }
-
-          // Index symbols for cross-file lookup
-          try {
-            const allSymbols = validChunks.flatMap(c => c.symbols || []);
-            if (allSymbols.length > 0) {
-              await symbolIndex.clearFileSymbols(projectName, relativePath);
-              await symbolIndex.indexFileSymbols(
-                projectName, relativePath, content,
-                [...new Set(allSymbols)],
-                validChunks[0]?.startLine || 1,
-                validChunks[validChunks.length - 1]?.endLine || 1
-              );
-            }
-          } catch (symError: any) {
-            logger.debug(`Symbol indexing failed for ${relativePath}`, { error: symError.message });
-          }
-
           stats.indexedFiles++;
-        } catch (error) {
-          logger.warn(`Failed to read file: ${filePath}`, { error });
+        } else {
           stats.errors++;
         }
       }
@@ -561,74 +591,94 @@ export async function indexProject(options: IndexOptions): Promise<IndexStats> {
           gitCommit: chunk.gitCommit,
         });
 
-        // Process embeddings in batches
+        // Process embeddings in batches with concurrency limit
+        const embedLimit = pLimit(config.INDEXER_EMBED_CONCURRENCY);
+        const embedBatches: typeof filteredChunks[] = [];
         for (let j = 0; j < filteredChunks.length; j += embeddingBatchSize) {
-          const chunkBatch = filteredChunks.slice(j, j + embeddingBatchSize);
-          const textsForEmbedding = buildAnchoredTexts(chunkBatch);
+          embedBatches.push(filteredChunks.slice(j, j + embeddingBatchSize));
+        }
 
-          try {
-            if (config.SPARSE_VECTORS_ENABLED) {
-              const fullEmbeddings = await embeddingService.embedBatchFull(textsForEmbedding);
-              for (let k = 0; k < chunkBatch.length; k++) {
-                const chunk = chunkBatch[k];
-                sparsePoints.push({
-                  vectors: {
-                    dense: fullEmbeddings[k].dense,
-                    sparse: fullEmbeddings[k].sparse,
-                  },
-                  payload: buildPayload(chunk),
-                });
-                // Also build a dense-only point for legacy/typed collections
-                points.push({
-                  vector: fullEmbeddings[k].dense,
-                  payload: buildPayload(chunk),
-                });
-                stats.totalChunks++;
-              }
-            } else {
-              const embeddings = await embeddingService.embedBatch(textsForEmbedding);
-              for (let k = 0; k < chunkBatch.length; k++) {
-                const chunk = chunkBatch[k];
-                points.push({
-                  vector: embeddings[k],
-                  payload: buildPayload(chunk),
-                });
-                stats.totalChunks++;
-              }
-            }
-          } catch (error) {
-            logger.error(`Batch embedding failed, falling back to sequential`, { error });
-            for (const chunk of chunkBatch) {
-              try {
-                const anchor = buildAnchorString({
-                  filePath: chunk.relativePath,
-                  language: chunk.language,
-                  chunkType: chunk.chunkType || 'code',
-                  symbols: chunk.symbols,
-                  imports: chunk.imports,
-                  layer: chunk.layer,
-                  service: chunk.service || undefined,
-                });
-                const anchoredText = anchor + '\n' + chunk.text;
+        const embedResults = await Promise.all(
+          embedBatches.map(chunkBatch => embedLimit(async () => {
+            const localPoints: VectorPoint[] = [];
+            const localSparsePoints: SparseVectorPoint[] = [];
+            let chunkCount = 0;
+            let errorCount = 0;
+            const textsForEmbedding = buildAnchoredTexts(chunkBatch);
 
-                if (config.SPARSE_VECTORS_ENABLED) {
-                  const full = await embeddingService.embedFull(anchoredText);
-                  sparsePoints.push({
-                    vectors: { dense: full.dense, sparse: full.sparse },
+            try {
+              if (config.SPARSE_VECTORS_ENABLED) {
+                const fullEmbeddings = await embeddingService.embedBatchFull(textsForEmbedding);
+                for (let k = 0; k < chunkBatch.length; k++) {
+                  const chunk = chunkBatch[k];
+                  localSparsePoints.push({
+                    vectors: {
+                      dense: fullEmbeddings[k].dense,
+                      sparse: fullEmbeddings[k].sparse,
+                    },
                     payload: buildPayload(chunk),
                   });
-                  points.push({ vector: full.dense, payload: buildPayload(chunk) });
-                } else {
-                  const embedding = await embeddingService.embed(anchoredText);
-                  points.push({ vector: embedding, payload: buildPayload(chunk) });
+                  localPoints.push({
+                    vector: fullEmbeddings[k].dense,
+                    payload: buildPayload(chunk),
+                  });
+                  chunkCount++;
                 }
-                stats.totalChunks++;
-              } catch (embError) {
-                logger.warn(`Failed to embed chunk`, { error: embError });
-                stats.errors++;
+              } else {
+                const embeddings = await embeddingService.embedBatch(textsForEmbedding);
+                for (let k = 0; k < chunkBatch.length; k++) {
+                  const chunk = chunkBatch[k];
+                  localPoints.push({
+                    vector: embeddings[k],
+                    payload: buildPayload(chunk),
+                  });
+                  chunkCount++;
+                }
+              }
+            } catch (error) {
+              logger.error(`Batch embedding failed, falling back to sequential`, { error });
+              for (const chunk of chunkBatch) {
+                try {
+                  const anchor = buildAnchorString({
+                    filePath: chunk.relativePath,
+                    language: chunk.language,
+                    chunkType: chunk.chunkType || 'code',
+                    symbols: chunk.symbols,
+                    imports: chunk.imports,
+                    layer: chunk.layer,
+                    service: chunk.service || undefined,
+                  });
+                  const anchoredText = anchor + '\n' + chunk.text;
+
+                  if (config.SPARSE_VECTORS_ENABLED) {
+                    const full = await embeddingService.embedFull(anchoredText);
+                    localSparsePoints.push({
+                      vectors: { dense: full.dense, sparse: full.sparse },
+                      payload: buildPayload(chunk),
+                    });
+                    localPoints.push({ vector: full.dense, payload: buildPayload(chunk) });
+                  } else {
+                    const embedding = await embeddingService.embed(anchoredText);
+                    localPoints.push({ vector: embedding, payload: buildPayload(chunk) });
+                  }
+                  chunkCount++;
+                } catch (embError) {
+                  logger.warn(`Failed to embed chunk`, { error: embError });
+                  errorCount++;
+                }
               }
             }
-          }
+
+            return { localPoints, localSparsePoints, chunkCount, errorCount };
+          }))
+        );
+
+        // Collect embedding results
+        for (const result of embedResults) {
+          points.push(...result.localPoints);
+          sparsePoints.push(...result.localSparsePoints);
+          stats.totalChunks += result.chunkCount;
+          stats.errors += result.errorCount;
         }
 
         // Upsert batch
@@ -679,6 +729,7 @@ export async function indexProject(options: IndexOptions): Promise<IndexStats> {
     progress.status = 'completed';
     progress.completedAt = new Date();
     emitProgress(projectName);
+    workHandle.complete({ indexedFiles: stats.indexedFiles, totalChunks: stats.totalChunks });
 
     // Invalidate search cache for this collection
     await cacheService.invalidateCollection(collectionName);
@@ -690,6 +741,7 @@ export async function indexProject(options: IndexOptions): Promise<IndexStats> {
     progress.status = 'error';
     progress.error = error.message;
     emitProgress(projectName);
+    workHandle.fail(error.message);
 
     logger.error(`Indexing failed for ${projectName}`, { error: error.message, stack: error.stack, data: error.data || error.response?.data });
     throw error;

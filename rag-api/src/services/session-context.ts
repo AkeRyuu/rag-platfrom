@@ -18,6 +18,7 @@ import { usagePatterns } from './usage-patterns';
 import { predictiveLoader } from './predictive-loader';
 import { cacheService } from './cache';
 import { projectProfileService } from './project-profile';
+import { staleMemoryDetector } from './stale-memory-detector';
 import { logger } from '../utils/logger';
 
 export interface SessionContext {
@@ -62,6 +63,7 @@ export interface SessionSummary {
   queriesCount: number;
   learningsSaved: number;
   summary: string;
+  staleMemoriesCount?: number;
 }
 
 class SessionContextService {
@@ -371,6 +373,20 @@ class SessionContextService {
     // Clear from active cache
     await cacheService.delete(this.getCacheKey(projectName, sessionId));
 
+    // Detect stale memories (non-blocking)
+    let staleMemoriesCount = 0;
+    try {
+      const staleResult = await staleMemoryDetector.detectStaleMemories(projectName);
+      staleMemoriesCount = staleResult.staleMemories.length;
+      if (staleMemoriesCount > 0) {
+        logger.info(`Found ${staleMemoriesCount} stale memories for ${projectName}`, {
+          reasons: staleResult.staleMemories.slice(0, 5).map(m => m.reason),
+        });
+      }
+    } catch {
+      // Non-critical, ignore
+    }
+
     const result: SessionSummary = {
       sessionId,
       duration,
@@ -379,11 +395,13 @@ class SessionContextService {
       queriesCount: context.recentQueries.length,
       learningsSaved,
       summary: summary || usageSummary.summary || 'Session ended',
+      staleMemoriesCount,
     };
 
     logger.info(`Session ended: ${sessionId}`, {
       duration: Math.round(duration / 1000),
       learningsSaved,
+      staleMemories: staleMemoriesCount,
     });
 
     return result;

@@ -4,6 +4,9 @@
  * Universal RAG API that supports multiple projects with isolated collections.
  */
 
+import { initTracing, shutdownTracing } from './utils/tracing';
+initTracing();  // Must be before any other imports that create HTTP connections
+
 import express, { Express, Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import { v4 as uuidv4 } from 'uuid';
@@ -14,6 +17,7 @@ import { vectorStore } from './services/vector-store';
 import { cacheService } from './services/cache';
 import { errorHandler } from './middleware/error-handler';
 import { authMiddleware } from './middleware/auth';
+import { rateLimitMiddleware } from './middleware/rate-limit';
 import searchRoutes from './routes/search';
 import indexRoutes from './routes/index';
 import memoryRoutes from './routes/memory';
@@ -23,6 +27,8 @@ import analyticsRoutes from './routes/analytics';
 import agentRoutes from './routes/agents';
 import pmRoutes from './routes/pm';
 import qualityRoutes from './routes/quality';
+import eventsRoutes from './routes/events';
+import tribunalRoutes from './routes/tribunal';
 
 // Extend Express Request type
 declare global {
@@ -66,6 +72,9 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 // API key authentication (skips /health and /metrics)
 app.use(authMiddleware);
 
+// Rate limiting (tiered: default/llm/indexing)
+app.use(rateLimitMiddleware);
+
 // Health check
 app.get('/health', async (req: Request, res: Response) => {
   const cacheStats = await cacheService.getStats();
@@ -106,6 +115,8 @@ app.use('/api', analyticsRoutes);
 app.use('/api', agentRoutes);
 app.use('/api', pmRoutes);
 app.use('/api', qualityRoutes);
+app.use('/api', eventsRoutes);
+app.use('/api', tribunalRoutes);
 
 // Legacy routes for backward compatibility with cypro-rag MCP
 app.use('/api/dev/codebase', (req, res, next) => {
@@ -143,6 +154,10 @@ export async function startServer(): Promise<void> {
     logger.info('Initializing vector store...');
     await vectorStore.initialize();
 
+    // Start heartbeat monitor
+    const { heartbeatMonitor } = await import('./services/heartbeat');
+    heartbeatMonitor.start();
+
     // Start server
     app.listen(config.API_PORT, config.API_HOST, () => {
       logger.info(`Shared RAG API running at http://${config.API_HOST}:${config.API_PORT}`);
@@ -154,6 +169,17 @@ export async function startServer(): Promise<void> {
     process.exit(1);
   }
 }
+
+// Graceful shutdown
+process.on('SIGTERM', async () => {
+  logger.info('SIGTERM received, shutting down...');
+  const { heartbeatMonitor } = await import('./services/heartbeat');
+  heartbeatMonitor.stop();
+  const { llmUsageLogger } = await import('./services/llm-usage-logger');
+  await llmUsageLogger.shutdown();
+  await shutdownTracing();
+  process.exit(0);
+});
 
 // Run if executed directly
 if (require.main === module) {

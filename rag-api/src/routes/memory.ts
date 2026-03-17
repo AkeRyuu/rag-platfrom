@@ -390,4 +390,15 @@ router.get('/developer-profile', validateProjectName, asyncHandler(async (req: R
   res.json(profile);
 }));
 
+/**
+ * Detect stale memories
+ * GET /api/memory/stale
+ */
+router.get('/memory/stale', validateProjectName, asyncHandler(async (req: Request, res: Response) => {
+  const { projectName } = req.body;
+  const { staleMemoryDetector } = await import('../services/stale-memory-detector');
+  const result = await staleMemoryDetector.detectStaleMemories(projectName);
+  res.json(result);
+}));
+
 export default router;

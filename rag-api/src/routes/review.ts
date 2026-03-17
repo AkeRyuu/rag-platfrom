@@ -8,7 +8,13 @@ import { embeddingService } from '../services/embedding';
 import { llm } from '../services/llm';
 import { memoryService } from '../services/memory';
 import { asyncHandler } from '../middleware/async-handler';
-import { validate, validateProjectName, reviewSchema, securityReviewSchema } from '../utils/validation';
+import { validate, validateProjectName, reviewSchema, securityReviewSchema as securityReviewInputSchema } from '../utils/validation';
+import {
+  parseLLMOutput,
+  codeReviewSchema as codeReviewOutputSchema,
+  securityReviewSchema as securityReviewOutputSchema,
+  complexityReviewSchema,
+} from '../utils/llm-output';
 
 const router = Router();
 
@@ -72,17 +78,9 @@ router.post('/review', validateProjectName, validate(reviewSchema), asyncHandler
   });
 
   // Parse structured response
-  let review;
-  try {
-    review = JSON.parse(result.text);
-  } catch {
-    review = {
-      summary: result.text,
-      issues: [],
-      suggestions: [],
-      score: null,
-    };
-  }
+  const { data: review } = parseLLMOutput(result.text, codeReviewOutputSchema, {
+    summary: result.text, score: 5, issues: [], positives: [], suggestions: [],
+  }, 'code-review');
 
   res.json({
     review,
@@ -99,7 +97,7 @@ router.post('/review', validateProjectName, validate(reviewSchema), asyncHandler
  * Analyze code for security issues
  * POST /api/review/security
  */
-router.post('/review/security', validate(securityReviewSchema), asyncHandler(async (req: Request, res: Response) => {
+router.post('/review/security', validate(securityReviewInputSchema), asyncHandler(async (req: Request, res: Response) => {
   const { code, language } = req.body;
 
   const result = await llm.completeWithBestProvider(
@@ -114,16 +112,9 @@ router.post('/review/security', validate(securityReviewSchema), asyncHandler(asy
     }
   );
 
-  let analysis;
-  try {
-    analysis = JSON.parse(result.text);
-  } catch {
-    analysis = {
-      vulnerabilities: [],
-      riskLevel: 'unknown',
-      summary: result.text,
-    };
-  }
+  const { data: analysis } = parseLLMOutput(result.text, securityReviewOutputSchema, {
+    vulnerabilities: [], riskLevel: 'low' as const, summary: result.text,
+  }, 'security-review');
 
   res.json({ analysis });
 }));
@@ -150,17 +141,9 @@ router.post('/review/complexity', asyncHandler(async (req: Request, res: Respons
     }
   );
 
-  let analysis;
-  try {
-    analysis = JSON.parse(result.text);
-  } catch {
-    analysis = {
-      complexity: 'unknown',
-      metrics: {},
-      suggestions: [],
-      summary: result.text,
-    };
-  }
+  const { data: analysis } = parseLLMOutput(result.text, complexityReviewSchema, {
+    complexity: 'medium' as const, metrics: { estimatedCyclomaticComplexity: 0, nestingDepth: 0, functionsCount: 0, linesOfCode: 0 }, hotspots: [], suggestions: [],
+  }, 'complexity-review');
 
   res.json({ analysis });
 }));

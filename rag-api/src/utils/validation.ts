@@ -416,6 +416,30 @@ export const estimateFeatureSchema = z.object({
 export type EstimateFeatureInput = z.infer<typeof estimateFeatureSchema>;
 
 // ============================================
+// Tribunal Schemas
+// ============================================
+
+export const tribunalDebateSchema = z.object({
+  projectName: projectNameSchema.optional(),
+  topic: z.string().min(1).max(5000),
+  positions: z.array(z.string().min(1).max(1000)).min(2).max(4),
+  context: z.string().max(50000).optional(),
+  maxRounds: z.number().int().min(1).max(3).default(1),
+  useCodeContext: z.boolean().default(false),
+  autoRecord: z.boolean().default(false),
+  maxBudget: z.number().min(0.01).max(5).default(0.50),
+});
+
+export type TribunalDebateInput = z.infer<typeof tribunalDebateSchema>;
+
+export const tribunalHistorySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(50).default(10),
+  topic: z.string().max(1000).optional(),
+});
+
+export type TribunalHistoryInput = z.infer<typeof tribunalHistorySchema>;
+
+// ============================================
 // Agent Schemas
 // ============================================
 

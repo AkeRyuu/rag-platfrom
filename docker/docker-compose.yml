@@ -11,12 +11,16 @@ services:
     image: qdrant/qdrant:v1.12.6
     container_name: shared-qdrant
     ports:
-      - "6333:6333"
-      - "6334:6334"
+      - "127.0.0.1:6333:6333"
+      - "127.0.0.1:6334:6334"
     volumes:
       - qdrant_data:/qdrant/storage
     environment:
       - QDRANT__SERVICE__GRPC_PORT=6334
+    deploy:
+      resources:
+        limits:
+          memory: 4G
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:6333/healthz"]
       interval: 30s
@@ -29,13 +33,15 @@ services:
     image: ollama/ollama:latest
     container_name: shared-ollama
     ports:
-      - "11434:11434"
+      - "127.0.0.1:11434:11434"
     volumes:
       - ollama_data:/root/.ollama
     environment:
       - OLLAMA_DEBUG=INFO
     deploy:
       resources:
+        limits:
+          memory: 24G
         reservations:
           devices:
             - driver: nvidia
@@ -55,13 +61,17 @@ services:
       dockerfile: Dockerfile
     container_name: shared-bge-m3
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
     environment:
       - MODEL_NAME=BAAI/bge-m3
       - MAX_LENGTH=8192
       - USE_GPU=false
     volumes:
       - bge_m3_cache:/root/.cache
+    deploy:
+      resources:
+        limits:
+          memory: 4G
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 30s
@@ -74,10 +84,14 @@ services:
     image: redis:7-alpine
     container_name: shared-redis
     ports:
-      - "6380:6379"  # Different port to avoid conflicts with project-specific Redis
+      - "127.0.0.1:6380:6379"  # Different port to avoid conflicts with project-specific Redis
     volumes:
       - redis_data:/data
-    command: redis-server --appendonly yes
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+    deploy:
+      resources:
+        limits:
+          memory: 512M
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -92,13 +106,18 @@ services:
       dockerfile: Dockerfile
     container_name: shared-rag-api
     ports:
-      - "3100:3100"
+      - "127.0.0.1:3100:3100"
     environment:
       - QDRANT_URL=http://qdrant:6333
       - OLLAMA_URL=http://ollama:11434
       - BGE_M3_URL=http://bge-m3:8080
       - REDIS_URL=redis://redis:6379
       - API_PORT=3100
+      - NODE_OPTIONS=--max-old-space-size=2048
+    deploy:
+      resources:
+        limits:
+          memory: 2G
     depends_on:
       - qdrant
       - ollama
@@ -113,9 +132,87 @@ services:
       dockerfile: Dockerfile
     container_name: shared-dashboard
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
+    deploy:
+      resources:
+        limits:
+          memory: 256M
     depends_on:
       - rag-api
+    restart: unless-stopped
+
+  # --- Monitoring (profile: monitoring) ---
+  # Usage: docker-compose --profile monitoring up -d
+
+  prometheus:
+    image: prom/prometheus:v2.51.0
+    container_name: shared-prometheus
+    profiles: ["monitoring"]
+    ports:
+      - "127.0.0.1:9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.retention.time=30d'
+      - '--storage.tsdb.retention.size=2GB'
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.55
+    container_name: shared-jaeger
+    profiles: ["monitoring"]
+    ports:
+      - "127.0.0.1:16686:16686"  # Jaeger UI
+      - "127.0.0.1:4318:4318"    # OTLP HTTP receiver
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:16686/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:10.4.1
+    container_name: shared-grafana
+    profiles: ["monitoring"]
+    ports:
+      - "127.0.0.1:3200:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+    depends_on:
+      - prometheus
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
     restart: unless-stopped
 
 volumes:
@@ -127,6 +224,10 @@ volumes:
     name: shared_bge_m3_cache
   redis_data:
     name: shared_redis_data
+  prometheus_data:
+    name: shared_prometheus_data
+  grafana_data:
+    name: shared_grafana_data
 
 networks:
   default:

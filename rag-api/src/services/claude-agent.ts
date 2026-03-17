@@ -13,6 +13,7 @@ import { query, type Options, type SDKMessage, type SDKResultSuccess, type SDKRe
 import path from 'path';
 import config from '../config';
 import { logger } from '../utils/logger';
+import { workRegistry } from './work-handler';
 
 // ============================================
 // Types
@@ -146,6 +147,16 @@ class ClaudeAgentService {
     const abortController = new AbortController();
     this.activeAgents.set(agentId, abortController);
 
+    // Register in work registry with cancel support
+    const workHandle = workRegistry.register({
+      id: agentId,
+      type: 'claude-agent',
+      projectName: options.projectName,
+      description: `Claude ${options.type}: ${options.task.slice(0, 100)}`,
+      cancelFn: () => abortController.abort(),
+      metadata: { agentType: options.type },
+    });
+
     logger.info('Starting autonomous agent', {
       agentId,
       type: options.type,
@@ -261,12 +272,19 @@ class ClaudeAgentService {
         durationMs: result.durationMs,
       });
 
+      if (result.status === 'completed') {
+        workHandle.complete({ cost: result.cost, turns: result.numTurns });
+      } else {
+        workHandle.fail(result.error || result.status);
+      }
+
       return result;
     } catch (error: any) {
       const durationMs = Date.now() - startTime;
 
       if (error.name === 'AbortError') {
         logger.info('Autonomous agent interrupted', { agentId, durationMs });
+        workHandle.update({ state: 'cancelled' });
         return {
           id: agentId,
           type: options.type,
@@ -283,6 +301,7 @@ class ClaudeAgentService {
         error: error.message,
         durationMs,
       });
+      workHandle.fail(error.message);
 
       return {
         id: agentId,

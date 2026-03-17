@@ -11,6 +11,7 @@
 
 import type { ToolContext, ToolHandler, ToolHandlerResult } from "./types.js";
 import type { ContextEnricher } from "./context-enrichment.js";
+import { validationPipeline } from "./validation-hooks.js";
 
 // ── Timeouts ────────────────────────────────────────────────
 
@@ -241,15 +242,25 @@ export function wrapHandler(
     const startTime = Date.now();
 
     try {
+      // Validate: run PreToolUse hooks
+      const validation = await validationPipeline.validate(name, args, ctx);
+      if (!validation.allowed) {
+        return `Blocked: ${validation.reason || 'validation failed'}`;
+      }
+      const validatedArgs = validation.modifiedArgs || args;
+      const warningPrefix = validation.warnings?.length
+        ? `⚠️ ${validation.warnings.join(' | ')}\n\n`
+        : '';
+
       // Before: auto-enrich context
       const contextPrefix =
         ctx.enrichmentEnabled && deps.enricher
-          ? await deps.enricher.before(name, args, ctx)
+          ? await deps.enricher.before(name, validatedArgs, ctx)
           : null;
 
       // Execute original handler (with timeout)
       const timeoutMs = TOOL_TIMEOUTS[name] ?? DEFAULT_TIMEOUT_MS;
-      const result = await withTimeout(handler(args, ctx), timeoutMs, name);
+      const result = await withTimeout(handler(validatedArgs, ctx), timeoutMs, name);
 
       // Extract text for tracking/enrichment
       const text = typeof result === "string" ? result : result.text;
@@ -262,12 +273,13 @@ export function wrapHandler(
       // Track usage (fire-and-forget)
       trackUsage(name, args, startTime, true, text, undefined, ctx);
 
-      // Prepend context if available
-      if (contextPrefix) {
+      // Prepend context/warnings if available
+      const prefix = [warningPrefix, contextPrefix].filter(Boolean).join('');
+      if (prefix) {
         if (typeof result === "string") {
-          return contextPrefix + "\n\n" + result;
+          return prefix + result;
         }
-        return { text: contextPrefix + "\n\n" + result.text, structured: result.structured };
+        return { text: prefix + result.text, structured: result.structured };
       }
       return result;
     } catch (error: unknown) {

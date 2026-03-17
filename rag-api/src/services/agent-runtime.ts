@@ -6,6 +6,7 @@
  * the configured provider automatically.
  */
 
+import * as crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 import config from '../config';
 import { logger } from '../utils/logger';
@@ -13,6 +14,7 @@ import { embeddingService } from './embedding';
 import { vectorStore } from './vector-store';
 import { memoryService } from './memory';
 import { llm } from './llm';
+import { workRegistry } from './work-handler';
 import { getAgentProfile, listAgentTypes, type AgentProfile, getToolDefinitions } from './agent-profiles';
 import {
   agentRunsTotal,
@@ -100,6 +102,15 @@ class AgentRuntime {
     const startTime = Date.now();
     agentRunsTotal.inc({ project: projectName, agent_type: agentType, status: 'started' });
 
+    // Register in work registry
+    const workHandle = workRegistry.register({
+      id: agentTask.id,
+      type: 'agent',
+      projectName,
+      description: `Agent ${agentType}: ${task.slice(0, 100)}`,
+      metadata: { agentType },
+    });
+
     try {
       // Choose loop based on provider
       const useToolUse = config.LLM_PROVIDER === 'anthropic';
@@ -111,6 +122,7 @@ class AgentRuntime {
       agentTask.result = result;
       agentTask.completedAt = new Date().toISOString();
       agentRunsTotal.inc({ project: projectName, agent_type: agentType, status: 'completed' });
+      workHandle.complete({ iterations: agentTask.usage.iterations, toolCalls: agentTask.usage.toolCalls });
 
       // Extract and save structured facts from observations
       try {
@@ -124,10 +136,12 @@ class AgentRuntime {
         agentTask.error = `Agent timed out after ${timeout}ms`;
         agentTask.result = this.extractPartialResult(agentTask);
         agentRunsTotal.inc({ project: projectName, agent_type: agentType, status: 'timeout' });
+        workHandle.update({ state: 'timeout' });
       } else {
         agentTask.status = 'failed';
         agentTask.error = error.message || String(error);
         agentRunsTotal.inc({ project: projectName, agent_type: agentType, status: 'failed' });
+        workHandle.fail(agentTask.error || 'Unknown error');
       }
     } finally {
       const durationMs = Date.now() - startTime;
@@ -276,6 +290,26 @@ class AgentRuntime {
       }
       messages.push({ role: 'assistant', content: assistantContent });
       messages.push({ role: 'user', content: toolResults });
+
+      // Check for convergence — early exit if observations are repetitive
+      if (iteration >= 3 && this.hasConverged(agentTask.steps)) {
+        messages.push({
+          role: 'user',
+          content: 'Your recent observations are very similar. Please synthesize what you have found and provide a FINAL_ANSWER now.',
+        });
+
+        const finalResponse = await llm.chat(messages, {
+          systemPrompt: profile.systemPrompt,
+          tools: [],  // No tools — force text-only response
+          temperature: profile.temperature,
+          maxTokens: 4096,
+          think: true,
+          provider: 'anthropic',
+        });
+        agentTask.usage.totalTokens += (finalResponse.promptTokens || 0) + (finalResponse.completionTokens || 0);
+        agentTask.usage.iterations = iteration + 1;
+        return finalResponse.text;
+      }
     }
 
     // Max iterations reached
@@ -392,6 +426,25 @@ class AgentRuntime {
 
         // Add observation to history
         messages.push({ role: 'user', content: `OBSERVATION: ${observation}` });
+
+        // Check for convergence — force synthesis if observations are repetitive
+        if (iteration >= 3 && this.hasConverged(agentTask.steps)) {
+          messages.push({
+            role: 'user',
+            content: 'Your recent observations are very similar. Please synthesize what you have found and provide a FINAL_ANSWER now.',
+          });
+
+          const finalResponse = await llm.chat(messages, {
+            temperature: profile.temperature,
+            maxTokens: 4096,
+            provider: 'ollama',
+          });
+          agentTask.usage.totalTokens += (finalResponse.promptTokens || 0) + (finalResponse.completionTokens || 0);
+          agentTask.usage.iterations = iteration + 1;
+
+          const finalParsed = this.parseReactResponse(finalResponse.text);
+          return finalParsed.finalAnswer || finalResponse.text;
+        }
       } else {
         // No action and no final answer — nudge the agent
         agentTask.steps.push(step);
@@ -546,6 +599,55 @@ class AgentRuntime {
         .join('\n\n');
     },
   };
+
+  // ============================================
+  // Convergence Detection
+  // ============================================
+
+  /**
+   * Detect if agent observations have converged (same info being retrieved).
+   * Uses Jaccard similarity on observation content hashes across a sliding window.
+   * Returns true if the last `windowSize` iterations all have similarity >= threshold.
+   */
+  private hasConverged(
+    steps: AgentStep[],
+    windowSize: number = 3,
+    threshold: number = 0.7,
+  ): boolean {
+    if (steps.length < windowSize) return false;
+
+    // Extract token sets from observations in the window
+    const window = steps.slice(-windowSize);
+    const tokenSets = window.map(step => {
+      const text = step.observation?.result || step.thought || '';
+      return new Set(text.toLowerCase().split(/\s+/).filter(t => t.length > 3));
+    });
+
+    // Pairwise Jaccard similarity — all pairs must exceed threshold
+    for (let i = 0; i < tokenSets.length; i++) {
+      for (let j = i + 1; j < tokenSets.length; j++) {
+        const a = tokenSets[i];
+        const b = tokenSets[j];
+        if (a.size === 0 && b.size === 0) continue;
+
+        let intersection = 0;
+        for (const token of a) {
+          if (b.has(token)) intersection++;
+        }
+        const union = a.size + b.size - intersection;
+        const similarity = union > 0 ? intersection / union : 0;
+
+        if (similarity < threshold) return false;
+      }
+    }
+
+    logger.info('Agent convergence detected', {
+      iterations: steps.length,
+      windowSize,
+      threshold,
+    });
+    return true;
+  }
 
   // ============================================
   // Helpers

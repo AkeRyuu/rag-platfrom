@@ -5,6 +5,8 @@
 import { Router, Request, Response } from 'express';
 import { conversationAnalyzer } from '../services/conversation-analyzer';
 import { usageTracker } from '../services/usage-tracker';
+import { costTracker } from '../services/cost-tracker';
+import { workRegistry, type WorkType, type WorkState } from '../services/work-handler';
 // predictiveLoader removed — 0 calls in production audit
 import { asyncHandler } from '../middleware/async-handler';
 import {
@@ -184,6 +186,70 @@ router.post('/track-enrichment', asyncHandler(async (req: Request, res: Response
   }
 
   res.json({ tracked: true });
+}));
+
+// ============================================
+// Work Registry (unified status for indexer/agent/claude-agent)
+// ============================================
+
+/**
+ * List active work items
+ * GET /api/work
+ */
+router.get('/work', asyncHandler(async (req: Request, res: Response) => {
+  const type = req.query.type as WorkType | undefined;
+  const projectName = req.query.projectName as string | undefined;
+  const state = req.query.state as WorkState | undefined;
+
+  const items = workRegistry.list({ type, projectName, state });
+  const counts = workRegistry.getRunningCounts();
+
+  res.json({ items, running: counts });
+}));
+
+/**
+ * Get a specific work item
+ * GET /api/work/:id
+ */
+router.get('/work/:id', asyncHandler(async (req: Request, res: Response) => {
+  const item = workRegistry.get(req.params.id);
+  if (!item) {
+    return res.status(404).json({ error: 'Work item not found' });
+  }
+  res.json(item);
+}));
+
+/**
+ * Cancel a work item
+ * POST /api/work/:id/cancel
+ */
+router.post('/work/:id/cancel', asyncHandler(async (req: Request, res: Response) => {
+  const cancelled = workRegistry.cancel(req.params.id);
+  res.json({ cancelled });
+}));
+
+// ============================================
+// Cost Tracking
+// ============================================
+
+/**
+ * Get LLM cost summary for a project
+ * GET /api/cost-summary
+ */
+router.get('/cost-summary', validateProjectName, asyncHandler(async (req: Request, res: Response) => {
+  const { projectName } = req.body;
+  const days = parseInt(req.query.days as string) || 7;
+
+  const summary = await costTracker.getCostSummary(projectName, days);
+  res.json(summary);
+}));
+
+/**
+ * Get current pricing table
+ * GET /api/cost-pricing
+ */
+router.get('/cost-pricing', asyncHandler(async (_req: Request, res: Response) => {
+  res.json(costTracker.getPricing());
 }));
 
 // ============================================

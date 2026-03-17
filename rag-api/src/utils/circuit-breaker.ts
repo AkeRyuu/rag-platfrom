@@ -210,10 +210,23 @@ export const embeddingCircuit = circuitBreakers.get('embedding', {
   timeout: 30000,
 });
 
-export const llmCircuit = circuitBreakers.get('llm', {
+export const ollamaCircuit = circuitBreakers.get('ollama', {
   failureThreshold: 3,
   timeout: 60000,
 });
+
+export const anthropicCircuit = circuitBreakers.get('anthropic', {
+  failureThreshold: 3,
+  timeout: 60000,
+});
+
+export const openaiCircuit = circuitBreakers.get('openai', {
+  failureThreshold: 3,
+  timeout: 60000,
+});
+
+// Backward-compat alias
+export const llmCircuit = ollamaCircuit;
 
 export const vectorStoreCircuit = circuitBreakers.get('vectorStore', {
   failureThreshold: 5,

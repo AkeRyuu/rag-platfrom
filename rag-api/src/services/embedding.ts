@@ -12,6 +12,8 @@ import axios from 'axios';
 import config from '../config';
 import { logger } from '../utils/logger';
 import { cacheService, SessionCacheOptions, CacheStats } from './cache';
+import { withRetry } from '../utils/retry';
+import { embeddingCircuit } from '../utils/circuit-breaker';
 
 export interface EmbeddingResult {
   embedding: number[];
@@ -186,7 +188,13 @@ class EmbeddingService {
 
   private async embedFullWithBGE(text: string): Promise<FullEmbeddingResult> {
     try {
-      const response = await axios.post(`${config.BGE_M3_URL}/embed/full`, { text });
+      const response = await embeddingCircuit.execute(() =>
+        withRetry(
+          () => axios.post(`${config.BGE_M3_URL}/embed/full`, { text }),
+          { maxAttempts: 3, baseDelayMs: 300, maxDelayMs: 5000, timeoutMs: 15000 },
+          'embedding.bge-m3.full'
+        )
+      );
       return {
         dense: response.data.dense,
         sparse: response.data.sparse,
@@ -199,7 +207,13 @@ class EmbeddingService {
 
   private async embedBatchFullWithBGE(texts: string[]): Promise<FullEmbeddingResult[]> {
     try {
-      const response = await axios.post(`${config.BGE_M3_URL}/embed/batch/full`, { texts });
+      const response = await embeddingCircuit.execute(() =>
+        withRetry(
+          () => axios.post(`${config.BGE_M3_URL}/embed/batch/full`, { texts }),
+          { maxAttempts: 3, baseDelayMs: 500, maxDelayMs: 10000, timeoutMs: 30000 },
+          'embedding.bge-m3.batchFull'
+        )
+      );
       const dense: number[][] = response.data.dense;
       const sparse: SparseVector[] = response.data.sparse;
       return dense.map((d, i) => ({ dense: d, sparse: sparse[i] }));
@@ -210,19 +224,27 @@ class EmbeddingService {
   }
 
   /**
-   * Compute embedding (no caching)
+   * Compute embedding (no caching) — wrapped with circuit breaker + retry
    */
   private async computeEmbedding(text: string): Promise<number[]> {
-    switch (this.provider) {
-      case 'bge-m3-server':
-        return this.embedWithBGE(text);
-      case 'ollama':
-        return this.embedWithOllama(text);
-      case 'openai':
-        return this.embedWithOpenAI(text);
-      default:
-        throw new Error(`Unknown embedding provider: ${this.provider}`);
-    }
+    return embeddingCircuit.execute(() =>
+      withRetry(
+        () => {
+          switch (this.provider) {
+            case 'bge-m3-server':
+              return this.embedWithBGE(text);
+            case 'ollama':
+              return this.embedWithOllama(text);
+            case 'openai':
+              return this.embedWithOpenAI(text);
+            default:
+              throw new Error(`Unknown embedding provider: ${this.provider}`);
+          }
+        },
+        { maxAttempts: 3, baseDelayMs: 300, maxDelayMs: 5000, timeoutMs: 15000 },
+        `embedding.${this.provider}`
+      )
+    );
   }
 
   private async embedWithBGE(text: string): Promise<number[]> {
@@ -275,11 +297,15 @@ class EmbeddingService {
       return embeddings;
     }
 
-    // Compute uncached embeddings
+    // Compute uncached embeddings (with circuit breaker + retry)
     try {
-      const response = await axios.post(`${config.BGE_M3_URL}/embed/batch`, {
-        texts: uncachedTexts,
-      });
+      const response = await embeddingCircuit.execute(() =>
+        withRetry(
+          () => axios.post(`${config.BGE_M3_URL}/embed/batch`, { texts: uncachedTexts }),
+          { maxAttempts: 3, baseDelayMs: 500, maxDelayMs: 10000, timeoutMs: 30000 },
+          'embedding.bge-m3.batch'
+        )
+      );
       const computed = response.data.embeddings;
 
       // Store in cache and fill results
