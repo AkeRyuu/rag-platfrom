@@ -11,7 +11,9 @@
  */
 
 import { vectorStore } from './vector-store';
+import { computeRetention } from './memory-ltm';
 import { logger } from '../utils/logger';
+import config from '../config';
 import type { Memory } from './memory';
 
 export interface StaleMemory {
@@ -116,6 +118,54 @@ class StaleMemoryDetector {
 
         offset = response.next_page_offset as string | number | undefined;
       } while (offset && totalScanned < 10000);
+
+      // Phase 2: Also scan LTM collections with Ebbinghaus decay rule
+      if (config.CONSOLIDATION_ENABLED) {
+        for (const ltmCollection of [
+          `${projectName}_memory_episodic`,
+          `${projectName}_memory_semantic`,
+        ]) {
+          try {
+            let ltmOffset: string | number | undefined = undefined;
+            do {
+              const response = await vectorStore['client'].scroll(ltmCollection, {
+                limit: 500,
+                offset: ltmOffset,
+                with_payload: true,
+                with_vector: false,
+              });
+
+              for (const point of response.points) {
+                totalScanned++;
+                const payload = point.payload as Record<string, unknown>;
+                const id = String(point.id);
+                const content = (payload.content as string) || '';
+                const type = (payload.subtype ?? payload.type ?? 'note') as string;
+                const createdAt = (payload.timestamp ?? payload.createdAt) as string || '';
+                const stability = (payload.stability as number) ?? 7;
+                const accessCount = (payload.accessCount as number) ?? 0;
+                const tags = (payload.tags as string[]) || [];
+
+                // Ebbinghaus rule: retention < 0.1 AND never accessed → stale
+                if (createdAt && accessCount === 0) {
+                  const retention = computeRetention(createdAt, stability, accessCount);
+                  if (retention < 0.1) {
+                    staleMemories.push({
+                      id, content: content.slice(0, 200), type,
+                      reason: `Ebbinghaus retention ${(retention * 100).toFixed(1)}%, never accessed (stability=${stability}d)`,
+                      createdAt, tags,
+                    });
+                  }
+                }
+              }
+
+              ltmOffset = response.next_page_offset as string | number | undefined;
+            } while (ltmOffset && totalScanned < 10000);
+          } catch {
+            // Collection may not exist
+          }
+        }
+      }
 
       logger.info('Stale memory detection complete', {
         projectName,

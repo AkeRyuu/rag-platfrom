@@ -7,6 +7,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { vectorStore, VectorPoint } from './vector-store';
 import { embeddingService } from './embedding';
 import { memoryService, Memory, MemoryType, MemorySource, CreateMemoryOptions, SearchMemoryOptions, MemorySearchResult } from './memory';
+import { memoryLtm, type SemanticSubtype } from './memory-ltm';
 import { qualityGates } from './quality-gates';
 import { feedbackService } from './feedback';
 import { logger } from '../utils/logger';
@@ -106,7 +107,28 @@ class MemoryGovernanceService {
     if (!isAuto) {
       // Manual memory → go straight to durable via existing memoryService
       memoryGovernanceTotal.inc({ operation: 'ingest', tier: 'durable', project: projectName });
-      return memoryService.remember(memoryOptions);
+      const memory = await memoryService.remember(memoryOptions);
+
+      // Phase 2: also store manual memories in semantic LTM for Ebbinghaus tracking
+      if (config.CONSOLIDATION_ENABLED) {
+        const subtypeMap: Record<string, SemanticSubtype> = {
+          decision: 'decision', insight: 'insight', procedure: 'procedure',
+        };
+        const subtype = subtypeMap[memoryOptions.type ?? ''];
+        if (subtype) {
+          memoryLtm.storeSemantic({
+            projectName,
+            content: memoryOptions.content,
+            subtype,
+            confidence: 0.9,
+            tags: memoryOptions.tags,
+            source: 'manual',
+            metadata: { durableId: memory.id },
+          }).catch(err => logger.debug('LTM store for manual memory failed', { error: err.message }));
+        }
+      }
+
+      return memory;
     }
 
     // Auto-generated → check adaptive threshold, then quarantine

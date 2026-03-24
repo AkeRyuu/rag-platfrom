@@ -11,6 +11,7 @@ import { consolidationAgent } from '../services/consolidation-agent';
 import { memoryLtm } from '../services/memory-ltm';
 import { reconsolidation } from '../services/reconsolidation';
 import { memoryGraph } from '../services/memory-graph';
+import { memoryMigration } from '../services/memory-migration';
 import { asyncHandler } from '../middleware/async-handler';
 import {
   validate,
@@ -570,6 +571,20 @@ router.post('/memory/graph/visualize', validateProjectName, asyncHandler(async (
   const ids = Array.isArray(memoryIds) ? memoryIds : [];
   const subgraph = await memoryGraph.getSubgraph(projectName, ids);
   res.json(subgraph);
+}));
+
+// ── Migration ───────────────────────────────────────────
+
+/**
+ * Migrate durable memories to episodic/semantic LTM
+ * POST /api/memory/migrate-ltm
+ */
+router.post('/memory/migrate-ltm', validateProjectName, asyncHandler(async (req: Request, res: Response) => {
+  const { projectName } = req.body;
+  const dryRun = req.body.dryRun !== false; // default: dry run
+
+  const result = await memoryMigration.migrate(projectName, { dryRun });
+  res.json({ success: true, dryRun, ...result });
 }));
 
 export default router;
