@@ -16,8 +16,8 @@
  *   npx ts-node src/eval/benchmarks/coir-adapter.ts [--dataset cosqa|apps|stackoverflow] [--skip-index]
  */
 
-import fs from 'fs';
-import path from 'path';
+import * as fs from 'fs';
+import * as path from 'path';
 
 // ── Config ─────────────────────────────────────────────────────────────────
 
@@ -71,10 +71,12 @@ interface BeirQrel {
 
 interface DatasetSpec {
   name: string;
-  hfRepo: string;
-  queriesFile: string;
-  corpusFile: string;
-  qrelsFile: string;
+  /** HuggingFace dataset repo that contains both the queries and corpus splits */
+  hfQueriesCorpusRepo: string;
+  /** HuggingFace dataset repo that contains qrels splits */
+  hfQrelsRepo: string;
+  /** Split name for qrels (usually "test") */
+  qrelsSplit: string;
   collectionName: string;
 }
 
@@ -83,39 +85,28 @@ interface DatasetSpec {
 const DATASETS: Record<string, DatasetSpec> = {
   cosqa: {
     name: 'cosqa',
-    hfRepo: 'CoIR-Retrieval/cosqa',
-    queriesFile: 'queries.jsonl',
-    corpusFile: 'corpus.jsonl',
-    qrelsFile: 'qrels/test.tsv',
+    hfQueriesCorpusRepo: 'CoIR-Retrieval/cosqa-queries-corpus',
+    hfQrelsRepo: 'CoIR-Retrieval/cosqa-qrels',
+    qrelsSplit: 'test',
     collectionName: 'coir-cosqa_codebase',
   },
   apps: {
     name: 'apps',
-    hfRepo: 'CoIR-Retrieval/apps',
-    queriesFile: 'queries.jsonl',
-    corpusFile: 'corpus.jsonl',
-    qrelsFile: 'qrels/test.tsv',
+    hfQueriesCorpusRepo: 'CoIR-Retrieval/apps-queries-corpus',
+    hfQrelsRepo: 'CoIR-Retrieval/apps-qrels',
+    qrelsSplit: 'test',
     collectionName: 'coir-apps_codebase',
   },
   stackoverflow: {
     name: 'stackoverflow',
-    hfRepo: 'CoIR-Retrieval/stackoverflow-qa',
-    queriesFile: 'queries.jsonl',
-    corpusFile: 'corpus.jsonl',
-    qrelsFile: 'qrels/test.tsv',
+    hfQueriesCorpusRepo: 'CoIR-Retrieval/stackoverflow-qa-queries-corpus',
+    hfQrelsRepo: 'CoIR-Retrieval/stackoverflow-qa-qrels',
+    qrelsSplit: 'test',
     collectionName: 'coir-stackoverflow_codebase',
   },
 };
 
 // ── HTTP helpers ───────────────────────────────────────────────────────────
-
-async function httpGet(url: string): Promise<Response> {
-  const res = await fetch(url);
-  if (!res.ok) {
-    throw new Error(`GET ${url} failed: ${res.status} ${res.statusText}`);
-  }
-  return res;
-}
 
 async function httpPostJson(url: string, body: unknown): Promise<unknown> {
   const res = await fetch(url, {
@@ -143,25 +134,94 @@ async function httpPutJson(url: string, body: unknown): Promise<unknown> {
   return res.json();
 }
 
-// ── HuggingFace download ───────────────────────────────────────────────────
+// ── HuggingFace datasets-server API ───────────────────────────────────────
+
+const HF_ROWS_API = 'https://datasets-server.huggingface.co/rows';
+const HF_PAGE_SIZE = 100; // datasets-server max per request
+
+interface HfRowsResponse<T> {
+  rows: Array<{ row_idx: number; row: T }>;
+  num_rows_total: number;
+}
 
 /**
- * Download a file from HuggingFace datasets repo using the resolve URL.
- * Falls back to datasets-server rows API for structured data if needed.
+ * Fetch all rows from a HuggingFace dataset split using the rows API.
+ * Paginates automatically until all rows are retrieved.
  */
-async function downloadHfFile(hfRepo: string, filePath: string): Promise<string> {
-  const url = `https://huggingface.co/datasets/${hfRepo}/resolve/main/${filePath}`;
-  console.log(`  Downloading ${url}`);
-
-  const res = await fetch(url, {
-    headers: { 'User-Agent': 'rag-eval-coir/1.0' },
-  });
-
-  if (!res.ok) {
-    throw new Error(`HuggingFace download failed: ${res.status} ${res.statusText}\n  URL: ${url}`);
+async function fetchHfSplitRows<T>(
+  dataset: string,
+  split: string,
+  cacheFile: string
+): Promise<T[]> {
+  if (fs.existsSync(cacheFile)) {
+    console.log(`  Cache hit: ${cacheFile}`);
+    return JSON.parse(fs.readFileSync(cacheFile, 'utf-8')) as T[];
   }
 
-  return res.text();
+  const allRows: T[] = [];
+  let offset = 0;
+  let total: number | null = null;
+
+  console.log(`  Fetching ${dataset} / ${split} ...`);
+
+  while (total === null || offset < total) {
+    const url =
+      `${HF_ROWS_API}?dataset=${encodeURIComponent(dataset)}` +
+      `&config=default&split=${encodeURIComponent(split)}` +
+      `&offset=${offset}&length=${HF_PAGE_SIZE}`;
+
+    let res: Response | null = null;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      res = await fetch(url, { headers: { 'User-Agent': 'rag-eval-coir/1.0' } });
+      if (res.ok) break;
+      if (res.status === 429 && attempt < 4) {
+        const wait = 3000 * (attempt + 1);
+        console.log(`    Rate limited, waiting ${wait / 1000}s...`);
+        await new Promise((r) => setTimeout(r, wait));
+        continue;
+      }
+      const text = await res.text();
+      throw new Error(
+        `HuggingFace datasets-server failed: ${res.status} ${res.statusText}\n  URL: ${url}\n  Body: ${text.slice(0, 400)}`
+      );
+    }
+    if (!res || !res.ok) throw new Error('HuggingFace fetch failed after retries');
+
+    const data = (await res.json()) as HfRowsResponse<T>;
+
+    if (total === null) {
+      total = data.num_rows_total;
+      console.log(`    Total rows: ${total}`);
+    }
+
+    for (const entry of data.rows) {
+      allRows.push(entry.row);
+    }
+
+    offset += data.rows.length;
+
+    // Throttle to avoid HF rate limits
+    await new Promise((r) => setTimeout(r, 300));
+
+    if (data.rows.length === 0) {
+      // Safety: break if the API returns no rows to avoid infinite loop
+      break;
+    }
+
+    if (offset % 5000 === 0 || offset >= total) {
+      console.log(`    Downloaded ${offset}/${total} rows`);
+    }
+  }
+
+  // Cache to disk
+  const cacheDir = path.dirname(cacheFile);
+  if (!fs.existsSync(cacheDir)) {
+    fs.mkdirSync(cacheDir, { recursive: true });
+  }
+  fs.writeFileSync(cacheFile, JSON.stringify(allRows), 'utf-8');
+  console.log(`  Cached to: ${cacheFile}`);
+
+  return allRows;
 }
 
 function ensureDataDir(datasetName: string): string {
@@ -169,59 +229,7 @@ function ensureDataDir(datasetName: string): string {
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
-  const qrelsDir = path.join(dir, 'qrels');
-  if (!fs.existsSync(qrelsDir)) {
-    fs.mkdirSync(qrelsDir, { recursive: true });
-  }
   return dir;
-}
-
-function localPath(datasetName: string, filePath: string): string {
-  return path.join(DATA_DIR, datasetName, filePath);
-}
-
-async function ensureCached(spec: DatasetSpec, filePath: string): Promise<string> {
-  const local = localPath(spec.name, filePath);
-  if (fs.existsSync(local)) {
-    console.log(`  Cache hit: ${local}`);
-    return fs.readFileSync(local, 'utf-8');
-  }
-
-  const content = await downloadHfFile(spec.hfRepo, filePath);
-  fs.writeFileSync(local, content, 'utf-8');
-  console.log(`  Cached to: ${local}`);
-  return content;
-}
-
-// ── Parsers ────────────────────────────────────────────────────────────────
-
-function parseJsonl<T>(text: string): T[] {
-  return text
-    .split('\n')
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0)
-    .map((line) => JSON.parse(line) as T);
-}
-
-/**
- * Parse BEIR qrels TSV (query_id\tcorpus_id\tscore).
- * First line may be a header row.
- */
-function parseQrelsTsv(text: string): BeirQrel[] {
-  const lines = text.split('\n').filter((l) => l.trim().length > 0);
-  const qrels: BeirQrel[] = [];
-
-  for (const line of lines) {
-    const parts = line.split('\t');
-    if (parts.length < 3) continue;
-    // Skip header
-    if (parts[0] === 'query-id' || parts[0] === 'query_id') continue;
-    const score = parseFloat(parts[2]);
-    if (!isNaN(score) && score > 0) {
-      qrels.push({ query_id: parts[0], corpus_id: parts[1], score });
-    }
-  }
-  return qrels;
 }
 
 // ── Embedding (Ollama direct) ──────────────────────────────────────────────
@@ -395,7 +403,7 @@ function ndcgAtK(retrievedIds: string[], relevanceMap: Map<string, number>, k: n
   }
 
   // Ideal DCG: sort by relevance descending, take top-K
-  const idealRels = [...relevanceMap.values()]
+  const idealRels = Array.from(relevanceMap.values())
     .filter((v) => v > 0)
     .sort((a, b) => b - a)
     .slice(0, k);
@@ -477,17 +485,22 @@ export class CoirAdapter extends BenchmarkAdapter {
 
   async prepare(): Promise<void> {
     console.log(`\nPreparing CoIR dataset: ${this.spec.name}`);
-    ensureDataDir(this.spec.name);
+    const dataDir = ensureDataDir(this.spec.name);
 
-    const [queriesText, corpusText, qrelsText] = await Promise.all([
-      ensureCached(this.spec, this.spec.queriesFile),
-      ensureCached(this.spec, this.spec.corpusFile),
-      ensureCached(this.spec, this.spec.qrelsFile),
+    const queriesCacheFile = path.join(dataDir, 'queries.json');
+    const corpusCacheFile = path.join(dataDir, 'corpus.json');
+    const qrelsCacheFile = path.join(dataDir, 'qrels-test.json');
+
+    const [queries, corpus, qrels] = await Promise.all([
+      fetchHfSplitRows<BeirQuery>(this.spec.hfQueriesCorpusRepo, 'queries', queriesCacheFile),
+      fetchHfSplitRows<BeirDoc>(this.spec.hfQueriesCorpusRepo, 'corpus', corpusCacheFile),
+      fetchHfSplitRows<BeirQrel>(this.spec.hfQrelsRepo, this.spec.qrelsSplit, qrelsCacheFile),
     ]);
 
-    this.queries = parseJsonl<BeirQuery>(queriesText);
-    this.corpus = parseJsonl<BeirDoc>(corpusText);
-    this.qrels = parseQrelsTsv(qrelsText);
+    this.queries = queries;
+    this.corpus = corpus;
+    // Keep only qrels with positive relevance score
+    this.qrels = qrels.filter((q) => q.score > 0);
 
     console.log(
       `  Loaded: ${this.queries.length} queries, ${this.corpus.length} docs, ${this.qrels.length} qrels`
