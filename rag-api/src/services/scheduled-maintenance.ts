@@ -10,23 +10,40 @@
 import config from '../config';
 import { logger } from '../utils/logger';
 import { vectorStore } from './vector-store';
+import { getQueue, createWorker } from '../events/queues';
+import { publishEvent } from '../events/emitter';
 
 class ScheduledMaintenance {
-  private interval: ReturnType<typeof setInterval> | null = null;
-
-  start(): void {
+  async start(): Promise<void> {
     if (!config.MAINTENANCE_ENABLED) {
       logger.info('Scheduled maintenance disabled');
       return;
     }
 
-    const intervalMs = config.MAINTENANCE_INTERVAL_HOURS * 3600000;
-    this.interval = setInterval(() => this.runCycle(), intervalMs);
-    this.interval.unref();
+    const queue = getQueue('maintenance');
 
-    // First run after 5 minutes (let services initialize)
-    const startDelay = setTimeout(() => this.runCycle(), 300000);
-    startDelay.unref();
+    // Repeatable job that fires on the configured interval
+    await queue.add(
+      'maintenance:cycle',
+      {},
+      {
+        repeat: { every: config.MAINTENANCE_INTERVAL_HOURS * 3600000 },
+        removeOnComplete: 10,
+        removeOnFail: 5,
+      }
+    );
+
+    // One-shot job for the first run after 5 minutes
+    await queue.add(
+      'maintenance:cycle',
+      {},
+      {
+        delay: 300000,
+        removeOnComplete: 10,
+      }
+    );
+
+    this.startWorker();
 
     logger.info('Scheduled maintenance started', {
       intervalHours: config.MAINTENANCE_INTERVAL_HOURS,
@@ -34,16 +51,25 @@ class ScheduledMaintenance {
     });
   }
 
-  stop(): void {
-    if (this.interval) {
-      clearInterval(this.interval);
-      this.interval = null;
-    }
+  private startWorker(): void {
+    createWorker(
+      'maintenance',
+      async (job) => {
+        if (job.name === 'maintenance:cycle') {
+          await this.runCycle();
+        }
+      },
+      { concurrency: 1 }
+    );
   }
+
+  // stop() is handled by BullMQ closeAll() in server.ts SIGTERM handler
 
   async runCycle(): Promise<void> {
     logger.info('Maintenance cycle starting');
     const startTime = Date.now();
+
+    publishEvent('maintenance:cycle.started', { projectName: 'system' }).catch(() => {});
 
     try {
       const projects = await this.getActiveProjects();
@@ -55,6 +81,11 @@ class ScheduledMaintenance {
           const { merged, deleted } = await this.deduplicateProject(project);
           totalMerged += merged;
           totalDeleted += deleted;
+          publishEvent('maintenance:dedup.completed', {
+            projectName: project,
+            merged,
+            deleted,
+          }).catch(() => {});
         } catch (err: any) {
           logger.error(`Maintenance failed for ${project}`, { error: err.message });
         }
@@ -67,6 +98,13 @@ class ScheduledMaintenance {
         totalDeleted,
         durationMs,
       });
+
+      publishEvent('maintenance:cycle.completed', {
+        projectName: 'system',
+        projectsProcessed: projects.length,
+        totalMerged,
+        totalDeleted,
+      }).catch(() => {});
     } catch (err: any) {
       logger.error('Maintenance cycle failed', { error: err.message });
     }
@@ -115,13 +153,14 @@ class ScheduledMaintenance {
       // Filter: only superseded + older than grace period
       const toDelete = points.filter((p: any) => {
         if (!p.payload?.supersededBy) return false;
-        const supersededAt = (p.payload?.supersededAt as string) || (p.payload?.createdAt as string);
+        const supersededAt =
+          (p.payload?.supersededAt as string) || (p.payload?.createdAt as string);
         return supersededAt && supersededAt < cutoff;
       });
 
       if (toDelete.length === 0) return 0;
 
-      const ids = toDelete.map(p => p.id as string);
+      const ids = toDelete.map((p) => p.id as string);
       await vectorStore.delete(collection, ids);
 
       logger.debug(`Deleted ${ids.length} superseded memories from ${collection}`);
@@ -135,11 +174,13 @@ class ScheduledMaintenance {
   private async getActiveProjects(): Promise<string[]> {
     try {
       const collections = await vectorStore.listCollections();
-      return [...new Set(
-        collections
-          .filter((c: string) => c.endsWith('_agent_memory'))
-          .map((c: string) => c.replace('_agent_memory', ''))
-      )];
+      return [
+        ...new Set(
+          collections
+            .filter((c: string) => c.endsWith('_agent_memory'))
+            .map((c: string) => c.replace('_agent_memory', ''))
+        ),
+      ];
     } catch {
       return [];
     }

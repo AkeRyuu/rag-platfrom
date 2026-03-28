@@ -13,11 +13,11 @@ export interface GraphEdge {
   toFile: string;
   toSymbol: string;
   edgeType: 'imports' | 'calls' | 'extends' | 'implements' | 'depends_on';
+  confidence?: 'scip' | 'tree-sitter' | 'heuristic';
+  symbolDescriptor?: string;
 }
 
-const SUPPORTED_EXTENSIONS = new Set([
-  '.ts', '.tsx', '.js', '.jsx', '.py', '.go', '.rs', '.java',
-]);
+const SUPPORTED_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.py', '.go', '.rs', '.java']);
 
 export class ASTParser implements FileParser {
   private codeParser = new CodeParser();
@@ -44,6 +44,11 @@ export class ASTParser implements FileParser {
     // Extract extends/implements
     edges.push(...this.extractInheritanceEdges(content, filePath, ext));
 
+    // Stamp all regex-derived edges as heuristic confidence
+    for (const edge of edges) {
+      if (!edge.confidence) edge.confidence = 'heuristic';
+    }
+
     return edges;
   }
 
@@ -53,9 +58,18 @@ export class ASTParser implements FileParser {
 
     if (['.ts', '.tsx', '.js', '.jsx'].includes(ext)) {
       // ES imports: import { X } from './path'
-      const esImports = [...content.matchAll(/import\s+(?:\{([^}]+)\}|(\w+))\s+from\s+['"]([^'"]+)['"]/g)];
+      const esImports = [
+        ...content.matchAll(/import\s+(?:\{([^}]+)\}|(\w+))\s+from\s+['"]([^'"]+)['"]/g),
+      ];
       for (const m of esImports) {
-        const symbols = m[1] ? m[1].split(',').map(s => s.trim().split(/\s+as\s+/)[0].trim()) : [m[2]];
+        const symbols = m[1]
+          ? m[1].split(',').map((s) =>
+              s
+                .trim()
+                .split(/\s+as\s+/)[0]
+                .trim()
+            )
+          : [m[2]];
         const toFile = this.resolveImportPath(m[3], filePath, ext);
 
         for (const sym of symbols) {
@@ -72,9 +86,13 @@ export class ASTParser implements FileParser {
       }
 
       // require() calls
-      const requires = [...content.matchAll(/(?:const|let|var)\s+(?:\{([^}]+)\}|(\w+))\s*=\s*require\s*\(\s*['"]([^'"]+)['"]\s*\)/g)];
+      const requires = [
+        ...content.matchAll(
+          /(?:const|let|var)\s+(?:\{([^}]+)\}|(\w+))\s*=\s*require\s*\(\s*['"]([^'"]+)['"]\s*\)/g
+        ),
+      ];
       for (const m of requires) {
-        const symbols = m[1] ? m[1].split(',').map(s => s.trim()) : [m[2]];
+        const symbols = m[1] ? m[1].split(',').map((s) => s.trim()) : [m[2]];
         const toFile = this.resolveImportPath(m[3], filePath, ext);
 
         for (const sym of symbols) {
@@ -94,7 +112,12 @@ export class ASTParser implements FileParser {
       const pyImports = [...content.matchAll(/from\s+([\w.]+)\s+import\s+(.+)/g)];
       for (const m of pyImports) {
         const module = m[1].replace(/\./g, '/');
-        const symbols = m[2].split(',').map(s => s.trim().split(/\s+as\s+/)[0].trim());
+        const symbols = m[2].split(',').map((s) =>
+          s
+            .trim()
+            .split(/\s+as\s+/)[0]
+            .trim()
+        );
         for (const sym of symbols) {
           if (sym) {
             edges.push({
@@ -159,9 +182,11 @@ export class ASTParser implements FileParser {
       }
 
       // class X implements Y
-      const implMatches = [...content.matchAll(/class\s+(\w+)(?:\s+extends\s+\w+)?\s+implements\s+([\w,\s]+)/g)];
+      const implMatches = [
+        ...content.matchAll(/class\s+(\w+)(?:\s+extends\s+\w+)?\s+implements\s+([\w,\s]+)/g),
+      ];
       for (const m of implMatches) {
-        const interfaces = m[2].split(',').map(s => s.trim());
+        const interfaces = m[2].split(',').map((s) => s.trim());
         for (const iface of interfaces) {
           if (iface) {
             edges.push({
@@ -178,7 +203,7 @@ export class ASTParser implements FileParser {
       // class X(Y, Z)
       const pyClasses = [...content.matchAll(/class\s+(\w+)\s*\(([^)]+)\)/g)];
       for (const m of pyClasses) {
-        const bases = m[2].split(',').map(s => s.trim());
+        const bases = m[2].split(',').map((s) => s.trim());
         for (const base of bases) {
           if (base && base !== 'object') {
             edges.push({
@@ -203,9 +228,11 @@ export class ASTParser implements FileParser {
         });
       }
 
-      const javaImpl = [...content.matchAll(/class\s+(\w+)(?:\s+extends\s+\w+)?\s+implements\s+([\w,\s]+)/g)];
+      const javaImpl = [
+        ...content.matchAll(/class\s+(\w+)(?:\s+extends\s+\w+)?\s+implements\s+([\w,\s]+)/g),
+      ];
       for (const m of javaImpl) {
-        const interfaces = m[2].split(',').map(s => s.trim());
+        const interfaces = m[2].split(',').map((s) => s.trim());
         for (const iface of interfaces) {
           if (iface) {
             edges.push({

@@ -3,21 +3,39 @@
  *
  * Each point in {project}_graph represents an edge between code entities.
  * Supports N-hop expansion, dependents/dependencies, and blast radius analysis.
+ *
+ * Vectors: graph edges are structural data, not semantic. A zero vector is stored
+ * per point so Qdrant collection requirements are satisfied while all queries use
+ * payload filter/scroll — never vector similarity search.
  */
 
 import { v4 as uuidv4 } from 'uuid';
 import { vectorStore, VectorPoint } from './vector-store';
-import { embeddingService } from './embedding';
 import { cacheService } from './cache';
 import { logger } from '../utils/logger';
 import { graphEdgesTotal, graphExpansionDuration } from '../utils/metrics';
+import config from '../config';
 import type { GraphEdge } from './parsers/ast-parser';
 
 const GRAPH_EXPAND_CACHE_TTL = 300; // 5 minutes
 
+/** Returns a zero vector of the configured dimension. */
+function zeroVector(): number[] {
+  return new Array(config.VECTOR_SIZE).fill(0);
+}
+
 class GraphStoreService {
   private getCollectionName(projectName: string): string {
     return `${projectName}_graph`;
+  }
+
+  /**
+   * Ensure keyword payload indexes exist on the graph collection.
+   * Called after collection creation; safe to call repeatedly.
+   */
+  async ensureIndexes(projectName: string): Promise<void> {
+    const collection = this.getCollectionName(projectName);
+    await vectorStore.ensurePayloadIndexes(collection);
   }
 
   /**
@@ -31,31 +49,115 @@ class GraphStoreService {
 
     if (edges.length === 0) return;
 
-    // Create points for each edge
-    const points: VectorPoint[] = [];
-
-    for (const edge of edges) {
-      const edgeText = `${edge.fromFile}:${edge.fromSymbol} ${edge.edgeType} ${edge.toFile}:${edge.toSymbol}`;
-      const embedding = await embeddingService.embed(edgeText);
-
-      points.push({
-        id: uuidv4(),
-        vector: embedding,
-        payload: {
-          fromFile: edge.fromFile,
-          fromSymbol: edge.fromSymbol,
-          toFile: edge.toFile,
-          toSymbol: edge.toSymbol,
-          edgeType: edge.edgeType,
-          project: projectName,
-        },
-      });
-
+    const dummy = zeroVector();
+    const points: VectorPoint[] = edges.map((edge) => {
       graphEdgesTotal.inc({ project: projectName, edge_type: edge.edgeType });
-    }
+
+      const payload: Record<string, unknown> = {
+        fromFile: edge.fromFile,
+        fromSymbol: edge.fromSymbol,
+        toFile: edge.toFile,
+        toSymbol: edge.toSymbol,
+        edgeType: edge.edgeType,
+        project: projectName,
+      };
+
+      if (edge.confidence !== undefined) {
+        payload.confidence = edge.confidence;
+      }
+      if (edge.symbolDescriptor !== undefined) {
+        payload.symbolDescriptor = edge.symbolDescriptor;
+      }
+
+      return { id: uuidv4(), vector: dummy, payload };
+    });
 
     await vectorStore.upsert(collection, points);
     logger.debug(`Indexed ${edges.length} edges for ${filePath}`, { project: projectName });
+  }
+
+  /**
+   * Merge SCIP edges into existing graph edges for a file.
+   * Instead of replacing all edges, this:
+   * 1. Reads existing edges for the file
+   * 2. Upgrades matching edges (same fromSymbol+edgeType) with SCIP toFile/toSymbol/confidence
+   * 3. Appends SCIP-only edges that have no tree-sitter counterpart
+   * 4. Preserves tree-sitter edges that SCIP didn't touch (e.g. calls, extends)
+   */
+  async mergeFileEdges(
+    projectName: string,
+    filePath: string,
+    scipEdges: GraphEdge[]
+  ): Promise<void> {
+    const collection = this.getCollectionName(projectName);
+
+    // Read existing edges for this file
+    const existing = await this.getEdges(collection, 'fromFile', filePath);
+
+    // Build SCIP lookup: (fromSymbol, edgeType) → edge
+    const scipByKey = new Map<string, GraphEdge>();
+    for (const edge of scipEdges) {
+      const key = `${edge.fromSymbol}::${edge.edgeType}`;
+      scipByKey.set(key, edge);
+    }
+
+    // Merge: upgrade existing edges with SCIP data, keep unmatched tree-sitter edges
+    const merged: GraphEdge[] = [];
+    const usedScipKeys = new Set<string>();
+
+    for (const edge of existing) {
+      const key = `${edge.fromSymbol}::${edge.edgeType}`;
+      const scip = scipByKey.get(key);
+      if (scip) {
+        // Upgrade with SCIP resolution
+        merged.push({
+          ...edge,
+          toFile: scip.toFile,
+          toSymbol: scip.toSymbol,
+          confidence: 'scip' as const,
+          symbolDescriptor: scip.symbolDescriptor,
+        });
+        usedScipKeys.add(key);
+      } else {
+        // Keep tree-sitter edge as-is
+        merged.push(edge);
+      }
+    }
+
+    // Append SCIP-only edges (no tree-sitter counterpart)
+    for (const edge of scipEdges) {
+      const key = `${edge.fromSymbol}::${edge.edgeType}`;
+      if (!usedScipKeys.has(key)) {
+        merged.push(edge);
+      }
+    }
+
+    // Replace file edges with merged set
+    await this.clearFileEdges(projectName, filePath);
+    if (merged.length === 0) return;
+
+    const dummy = zeroVector();
+    const points: VectorPoint[] = merged.map((edge) => {
+      const payload: Record<string, unknown> = {
+        fromFile: edge.fromFile,
+        fromSymbol: edge.fromSymbol,
+        toFile: edge.toFile,
+        toSymbol: edge.toSymbol,
+        edgeType: edge.edgeType,
+        project: projectName,
+      };
+      if (edge.confidence) payload.confidence = edge.confidence;
+      if (edge.symbolDescriptor) payload.symbolDescriptor = edge.symbolDescriptor;
+      return { id: uuidv4(), vector: dummy, payload };
+    });
+
+    await vectorStore.upsert(collection, points);
+    logger.debug(
+      `Merged ${merged.length} edges for ${filePath} (${usedScipKeys.size} upgraded by SCIP)`,
+      {
+        project: projectName,
+      }
+    );
   }
 
   /**
@@ -222,15 +324,22 @@ class GraphStoreService {
         },
       });
 
-      return results.points.map(p => {
+      return results.points.map((p) => {
         const payload = p.payload as Record<string, unknown>;
-        return {
+        const edge: GraphEdge = {
           fromFile: payload.fromFile as string,
           fromSymbol: payload.fromSymbol as string,
           toFile: payload.toFile as string,
           toSymbol: payload.toSymbol as string,
           edgeType: payload.edgeType as GraphEdge['edgeType'],
         };
+        if (payload.confidence !== undefined) {
+          edge.confidence = payload.confidence as GraphEdge['confidence'];
+        }
+        if (payload.symbolDescriptor !== undefined) {
+          edge.symbolDescriptor = payload.symbolDescriptor as string;
+        }
+        return edge;
       });
     } catch (error: any) {
       if (error.status === 404) return [];
@@ -255,7 +364,7 @@ class GraphStoreService {
       });
 
       return results.points
-        .map(p => (p.payload as Record<string, unknown>)[otherField] as string)
+        .map((p) => (p.payload as Record<string, unknown>)[otherField] as string)
         .filter(Boolean);
     } catch (error: any) {
       if (error.status === 404) return [];

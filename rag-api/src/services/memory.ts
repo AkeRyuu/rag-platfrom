@@ -9,10 +9,11 @@ import { vectorStore, VectorPoint } from './vector-store';
 import { embeddingService } from './embedding';
 import { llm } from './llm';
 import { relationshipClassifier } from './relationship-classifier';
-import { reconsolidation } from './reconsolidation';
+// reconsolidation moved to memory-effects worker
 import { spreadingActivation, type ActivatedMemory } from './spreading-activation';
 import { logger } from '../utils/logger';
 import config from '../config';
+import { publishEvent } from '../events/emitter';
 
 export type MemoryType =
   | 'decision'
@@ -326,19 +327,15 @@ class MemoryService {
       `${type}: ${content}${relatedTo ? ` (related to: ${relatedTo})` : ''}${tags.length > 0 ? ` [tags: ${tags.join(', ')}]` : ''}`
     );
 
-    // Auto-detect relationships with existing memories
-    try {
-      const relationships = await this.detectRelationships(projectName, content, type, embedding);
-      if (relationships.length > 0) {
-        memory.relationships = relationships;
-        // Mark superseded memories
-        for (const rel of relationships.filter((r) => r.type === 'supersedes')) {
-          await this.markSuperseded(collectionName, rel.targetId, memory.id);
-        }
-      }
-    } catch (err: any) {
-      logger.debug('Relationship detection failed', { error: err.message });
-    }
+    // Emit event for async relationship detection (handled by memory-effects worker)
+    publishEvent('memory:created', {
+      projectName,
+      memoryId: memory.id,
+      type,
+      content,
+      tags,
+      embedding,
+    }).catch(() => {});
 
     const point: VectorPoint = {
       id: memory.id,
@@ -582,21 +579,21 @@ class MemoryService {
 
     mappedResults = mappedResults.slice(0, limit);
 
-    // Fire-and-forget reconsolidation: strengthen recalled memories + track co-recalls
+    // Async reconsolidation via event worker
     if (config.RECONSOLIDATION_ENABLED && mappedResults.length > 0) {
-      reconsolidation
-        .onRecall(
-          projectName,
-          mappedResults.map((r) => ({
-            id: r.memory.id,
-            content: r.memory.content,
-            type: r.memory.type,
-            tags: r.memory.tags,
-            collection: 'durable' as const,
-          })),
-          query
-        )
-        .catch(() => {});
+      publishEvent('memory:recalled', {
+        projectName,
+        query,
+        resultCount: mappedResults.length,
+        memoryIds: mappedResults.map((r) => r.memory.id),
+        recalledMemories: mappedResults.map((r) => ({
+          id: r.memory.id,
+          content: r.memory.content,
+          type: r.memory.type,
+          tags: r.memory.tags,
+          collection: 'durable' as const,
+        })),
+      }).catch(() => {});
     }
 
     // Phase 4: Spreading activation — enrich results with graph-connected memories
@@ -1227,6 +1224,30 @@ class MemoryService {
       factEntities: point.payload.factEntities as string[] | undefined,
       factDateTs: point.payload.factDateTs as number | undefined,
     };
+  }
+
+  /**
+   * Async relationship detection — called by memory-effects worker after memory is stored.
+   * Runs detectRelationships and updates the stored memory with the results.
+   */
+  async _asyncDetectRelationships(
+    projectName: string,
+    memoryId: string,
+    content: string,
+    type: MemoryType,
+    embedding: number[]
+  ): Promise<void> {
+    const collectionName = this.getCollectionName(projectName);
+    const relationships = await this.detectRelationships(projectName, content, type, embedding);
+    if (relationships.length > 0) {
+      await vectorStore['client'].setPayload(collectionName, {
+        points: [memoryId],
+        payload: { relationships },
+      });
+      for (const rel of relationships.filter((r) => r.type === 'supersedes')) {
+        await this.markSuperseded(collectionName, rel.targetId, memoryId);
+      }
+    }
   }
 
   /**

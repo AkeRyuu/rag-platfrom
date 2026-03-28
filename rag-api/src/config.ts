@@ -24,7 +24,9 @@ function loadYamlConfig(): Record<string, any> {
       if (fs.existsSync(filePath)) {
         return (yaml.load(fs.readFileSync(filePath, 'utf-8')) as Record<string, any>) || {};
       }
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   }
   return {};
 }
@@ -168,6 +170,10 @@ export interface Config {
   SPREADING_ACTIVATION_HOP_DECAY: number;
   SPREADING_ACTIVATION_CACHE_TTL: number;
 
+  // Event-Driven Architecture (always on — BullMQ required)
+  EVENT_QUEUE_CONCURRENCY: number;
+  EVENT_DLQ_MAX_RETRIES: number;
+
   // Logging
   LOG_LEVEL: string;
 }
@@ -182,14 +188,22 @@ const config: Config = {
   QDRANT_API_KEY: process.env.QDRANT_API_KEY,
 
   // Embedding (env > reka.config.yaml > default)
-  EMBEDDING_PROVIDER: envOrYaml('EMBEDDING_PROVIDER', 'models.embeddings.provider', 'bge-m3-server') as Config['EMBEDDING_PROVIDER'],
+  EMBEDDING_PROVIDER: envOrYaml(
+    'EMBEDDING_PROVIDER',
+    'models.embeddings.provider',
+    'bge-m3-server'
+  ) as Config['EMBEDDING_PROVIDER'],
   BGE_M3_URL: envOrYaml('BGE_M3_URL', 'models.embeddings.url', 'http://localhost:8080'),
   OLLAMA_URL: envOrYaml('OLLAMA_URL', 'models.llm.utility.url', 'http://localhost:11434'),
   OLLAMA_EMBEDDING_MODEL: envOrYaml('OLLAMA_EMBEDDING_MODEL', 'models.embeddings.model', 'bge-m3'),
   OPENAI_API_KEY: process.env.OPENAI_API_KEY || yamlConfig?.models?.embeddings?.api_key,
 
   // LLM (env > reka.config.yaml > default)
-  LLM_PROVIDER: envOrYaml('LLM_PROVIDER', 'models.llm.standard.provider', 'ollama') as Config['LLM_PROVIDER'],
+  LLM_PROVIDER: envOrYaml(
+    'LLM_PROVIDER',
+    'models.llm.standard.provider',
+    'ollama'
+  ) as Config['LLM_PROVIDER'],
   OLLAMA_MODEL: envOrYaml('OLLAMA_MODEL', 'models.llm.utility.model', 'qwen3.5:35b'),
   OPENAI_MODEL: envOrYaml('OPENAI_MODEL', 'models.llm.standard.model', 'gpt-4-turbo-preview'),
   ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY || yamlConfig?.models?.llm?.complex?.api_key,
@@ -211,6 +225,10 @@ const config: Config = {
 
   // Redis
   REDIS_URL: process.env.REDIS_URL,
+
+  // Event-Driven Architecture (always on — BullMQ required)
+  EVENT_QUEUE_CONCURRENCY: parseInt(process.env.EVENT_QUEUE_CONCURRENCY || '3', 10),
+  EVENT_DLQ_MAX_RETRIES: parseInt(process.env.EVENT_DLQ_MAX_RETRIES || '3', 10),
 
   // Ingestion Pipeline
   SEPARATE_COLLECTIONS: process.env.SEPARATE_COLLECTIONS !== 'false',
@@ -266,8 +284,10 @@ const config: Config = {
   // Tribunal
   TRIBUNAL_MAX_ROUNDS: parseInt(process.env.TRIBUNAL_MAX_ROUNDS || '1', 10),
   TRIBUNAL_MAX_BUDGET: parseFloat(process.env.TRIBUNAL_MAX_BUDGET || '0.50'),
-  TRIBUNAL_JUDGE_COMPLEXITY: (process.env.TRIBUNAL_JUDGE_COMPLEXITY || 'complex') as Config['TRIBUNAL_JUDGE_COMPLEXITY'],
-  TRIBUNAL_ADVOCATE_COMPLEXITY: (process.env.TRIBUNAL_ADVOCATE_COMPLEXITY || 'complex') as Config['TRIBUNAL_ADVOCATE_COMPLEXITY'],
+  TRIBUNAL_JUDGE_COMPLEXITY: (process.env.TRIBUNAL_JUDGE_COMPLEXITY ||
+    'complex') as Config['TRIBUNAL_JUDGE_COMPLEXITY'],
+  TRIBUNAL_ADVOCATE_COMPLEXITY: (process.env.TRIBUNAL_ADVOCATE_COMPLEXITY ||
+    'complex') as Config['TRIBUNAL_ADVOCATE_COMPLEXITY'],
 
   // Human Memory Architecture (Phase 1: Sensory Buffer + Working Memory)
   SENSORY_BUFFER_MAX_LEN: parseInt(process.env.SENSORY_BUFFER_MAX_LEN || '10000', 10),
@@ -309,7 +329,9 @@ if (config.MEMORY_DECAY_MAX < 0 || config.MEMORY_DECAY_MAX > 1) {
   throw new Error(`MEMORY_DECAY_MAX must be between 0 and 1, got: ${config.MEMORY_DECAY_MAX}`);
 }
 if (config.MEMORY_COMPACTION_THRESHOLD < 0.5 || config.MEMORY_COMPACTION_THRESHOLD > 1) {
-  throw new Error(`MEMORY_COMPACTION_THRESHOLD must be between 0.5 and 1, got: ${config.MEMORY_COMPACTION_THRESHOLD}`);
+  throw new Error(
+    `MEMORY_COMPACTION_THRESHOLD must be between 0.5 and 1, got: ${config.MEMORY_COMPACTION_THRESHOLD}`
+  );
 }
 
 export default config;

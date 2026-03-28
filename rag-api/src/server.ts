@@ -5,7 +5,7 @@
  */
 
 import { initTracing, shutdownTracing } from './utils/tracing';
-initTracing();  // Must be before any other imports that create HTTP connections
+initTracing(); // Must be before any other imports that create HTTP connections
 
 import express, { Express, Request, Response, NextFunction } from 'express';
 import cors from 'cors';
@@ -33,6 +33,7 @@ import eventsRoutes from './routes/events';
 import tribunalRoutes from './routes/tribunal';
 import sensoryRoutes from './routes/sensory';
 import billingRoutes from './routes/billing';
+import adminRoutes from './routes/admin';
 
 // Extend Express Request type
 declare global {
@@ -48,21 +49,30 @@ const app: Express = express();
 
 // Middleware
 const corsOrigins = process.env.CORS_ORIGIN
-  ? process.env.CORS_ORIGIN.split(',').map(o => o.trim())
+  ? process.env.CORS_ORIGIN.split(',').map((o) => o.trim())
   : ['http://localhost:3000', 'http://127.0.0.1:3000'];
-app.use(cors({
-  origin: corsOrigins,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-API-Key', 'X-Project-Name', 'X-Project-Path', 'X-Request-ID'],
-  maxAge: 86400,
-}));
+app.use(
+  cors({
+    origin: corsOrigins,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
+    allowedHeaders: [
+      'Content-Type',
+      'Authorization',
+      'X-API-Key',
+      'X-Project-Name',
+      'X-Project-Path',
+      'X-Request-ID',
+    ],
+    maxAge: 86400,
+  })
+);
 app.use(express.json({ limit: '10mb' }));
 
 // Request ID and logging middleware
 app.use((req: Request, res: Response, next: NextFunction) => {
   const start = Date.now();
   const requestId = (req.headers['x-request-id'] as string) || uuidv4();
-  const projectName = req.headers['x-project-name'] as string || 'unknown';
+  const projectName = (req.headers['x-project-name'] as string) || 'unknown';
 
   // Attach request context
   req.requestId = requestId;
@@ -138,6 +148,7 @@ app.use('/api', eventsRoutes);
 app.use('/api', tribunalRoutes);
 app.use('/api', sensoryRoutes);
 app.use('/api/billing', billingRoutes);
+app.use('/api/admin', adminRoutes);
 
 // Legacy routes for backward compatibility with cypro-rag MCP
 app.use('/api/dev/codebase', (req, res, next) => {
@@ -181,7 +192,33 @@ export async function startServer(): Promise<void> {
 
     // Start scheduled maintenance (dedup, cleanup)
     const { scheduledMaintenance } = await import('./services/scheduled-maintenance');
-    scheduledMaintenance.start();
+    await scheduledMaintenance.start();
+
+    // Initialize BullMQ event queues + workers + Bull Board
+    const { createBullBoard } = await import('@bull-board/api');
+    const { BullMQAdapter } = await import('@bull-board/api/bullMQAdapter');
+    const { ExpressAdapter } = await import('@bull-board/express');
+    const { getQueue } = await import('./events/queues');
+
+    const serverAdapter = new ExpressAdapter();
+    serverAdapter.setBasePath('/admin/queues');
+
+    createBullBoard({
+      queues: ['memory-effects', 'session-lifecycle', 'indexing', 'maintenance', 'dead-letter'].map(
+        (name) => new BullMQAdapter(getQueue(name as Parameters<typeof getQueue>[0]))
+      ),
+      serverAdapter,
+    });
+
+    app.use('/admin/queues', serverAdapter.getRouter());
+    logger.info('BullMQ event queues initialized with Bull Board at /admin/queues');
+
+    const { startSessionLifecycleWorker } =
+      await import('./events/workers/session-lifecycle.worker');
+    startSessionLifecycleWorker();
+
+    const { startMemoryEffectsWorker } = await import('./events/workers/memory-effects.worker');
+    startMemoryEffectsWorker();
 
     // Start server
     app.listen(config.API_PORT, config.API_HOST, () => {
@@ -202,6 +239,8 @@ process.on('SIGTERM', async () => {
   heartbeatMonitor.stop();
   const { llmUsageLogger } = await import('./services/llm-usage-logger');
   await llmUsageLogger.shutdown();
+  const { closeAll } = await import('./events/queues');
+  await closeAll();
   await shutdownTracing();
   process.exit(0);
 });

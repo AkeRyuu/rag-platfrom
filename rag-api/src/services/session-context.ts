@@ -15,15 +15,13 @@ import { memoryService } from './memory';
 import { memoryGovernance } from './memory-governance';
 import { conversationAnalyzer } from './conversation-analyzer';
 import { usagePatterns } from './usage-patterns';
-import { predictiveLoader } from './predictive-loader';
 import { cacheService } from './cache';
 import { projectProfileService } from './project-profile';
-import { staleMemoryDetector } from './stale-memory-detector';
 import { workingMemory } from './working-memory';
-import { sensoryBuffer } from './sensory-buffer';
 import { consolidationAgent } from './consolidation-agent';
 import { logger } from '../utils/logger';
 import config from '../config';
+import { publishEvent } from '../events/emitter';
 
 export interface SessionContext {
   sessionId: string;
@@ -85,13 +83,7 @@ class SessionContextService {
    * Start a new session or resume existing
    */
   async startSession(options: StartSessionOptions): Promise<SessionContext> {
-    const {
-      projectName,
-      sessionId = uuidv4(),
-      initialContext,
-      resumeFrom,
-      metadata,
-    } = options;
+    const { projectName, sessionId = uuidv4(), initialContext, resumeFrom, metadata } = options;
 
     // Cleanup stale active sessions before looking for resumable ones
     await this.cleanupStaleSessions(projectName);
@@ -99,7 +91,7 @@ class SessionContextService {
     let context: SessionContext;
 
     // Try to resume from previous session (explicit or auto-detected)
-    const resumeId = resumeFrom || await this.findLastSessionId(projectName);
+    const resumeId = resumeFrom || (await this.findLastSessionId(projectName));
     if (resumeId) {
       const previousContext = await this.getSession(projectName, resumeId);
       if (previousContext) {
@@ -144,19 +136,19 @@ class SessionContextService {
     logger.info(`Session started: ${sessionId}`, { projectName, resumeFrom });
 
     // Initialize working memory for this session (human memory layer)
-    workingMemory.init(projectName, sessionId).catch(err =>
-      logger.debug('Working memory init failed', { error: err.message })
-    );
+    workingMemory
+      .init(projectName, sessionId)
+      .catch((err) => logger.debug('Working memory init failed', { error: err.message }));
 
-    // Background: generate predictions and prefetch likely-needed resources
-    this.triggerPredictivePrefetch(context).catch(err =>
-      logger.debug('Background prefetch failed', { error: err.message })
-    );
+    // Emit domain event (in-process SSE + BullMQ when enabled)
+    publishEvent('session:started', {
+      projectName,
+      sessionId: context.sessionId,
+      resumedFrom: resumeFrom,
+      initialContext: options.initialContext,
+    }).catch(() => {});
 
-    // Background: auto-merge similar memories to prevent bloat
-    this.triggerAutoMerge(projectName).catch(err =>
-      logger.debug('Background auto-merge failed', { error: err.message })
-    );
+    // Background work handled by session-lifecycle worker via session:started event
 
     // Build briefing with project profile + recalled context
     try {
@@ -176,9 +168,7 @@ class SessionContextService {
    */
   async getSession(projectName: string, sessionId: string): Promise<SessionContext | null> {
     // Try cache first
-    const cached = await cacheService.get<SessionContext>(
-      this.getCacheKey(projectName, sessionId)
-    );
+    const cached = await cacheService.get<SessionContext>(this.getCacheKey(projectName, sessionId));
     if (cached) {
       return cached;
     }
@@ -197,11 +187,7 @@ class SessionContextService {
       if (results.points.length > 0) {
         const context = results.points[0].payload as unknown as SessionContext;
         // Refresh cache
-        await cacheService.set(
-          this.getCacheKey(projectName, sessionId),
-          context,
-          3600
-        );
+        await cacheService.set(this.getCacheKey(projectName, sessionId), context, 3600);
         return context;
       }
     } catch (error: any) {
@@ -233,11 +219,7 @@ class SessionContextService {
     };
 
     // Update cache
-    await cacheService.set(
-      this.getCacheKey(projectName, sessionId),
-      updatedContext,
-      3600
-    );
+    await cacheService.set(this.getCacheKey(projectName, sessionId), updatedContext, 3600);
 
     // Persist to Qdrant
     await this.persistSession(updatedContext);
@@ -286,10 +268,12 @@ class SessionContextService {
 
     await this.updateSession(projectName, sessionId, context);
 
-    // Background: update predictions on new activity
-    this.triggerPredictivePrefetch(context).catch(err =>
-      logger.debug('Background prefetch on activity failed', { error: err.message })
-    );
+    // Background: update predictions via event worker
+    publishEvent('session:activity', {
+      projectName,
+      sessionId,
+      activityType: 'tool_use',
+    }).catch(() => {});
   }
 
   /**
@@ -332,11 +316,21 @@ class SessionContextService {
       } catch (err: any) {
         logger.warn('Consolidation failed, falling back to legacy path', { error: err.message });
         // Fall through to legacy path below
-        learningsSaved = await this.legacyExtractLearnings(projectName, sessionId, context, autoSaveLearnings);
+        learningsSaved = await this.legacyExtractLearnings(
+          projectName,
+          sessionId,
+          context,
+          autoSaveLearnings
+        );
       }
     } else {
       // Legacy path: pending learnings + conversation analyzer
-      learningsSaved = await this.legacyExtractLearnings(projectName, sessionId, context, autoSaveLearnings);
+      learningsSaved = await this.legacyExtractLearnings(
+        projectName,
+        sessionId,
+        context,
+        autoSaveLearnings
+      );
     }
 
     // Update session status
@@ -353,37 +347,18 @@ class SessionContextService {
     // Clear from active cache
     await cacheService.delete(this.getCacheKey(projectName, sessionId));
 
-    // Detect stale memories (non-blocking)
-    let staleMemoriesCount = 0;
-    try {
-      const staleResult = await staleMemoryDetector.detectStaleMemories(projectName);
-      staleMemoriesCount = staleResult.staleMemories.length;
-      if (staleMemoriesCount > 0) {
-        logger.info(`Found ${staleMemoriesCount} stale memories for ${projectName}`, {
-          reasons: staleResult.staleMemories.slice(0, 5).map(m => m.reason),
-        });
-      }
-    } catch {
-      // Non-critical, ignore
-    }
+    // Emit domain event (in-process SSE + BullMQ when enabled)
+    publishEvent('session:ending', {
+      projectName,
+      sessionId,
+      summary,
+    }).catch(() => {});
 
-    // Log working memory state before cleanup (Phase 2 will use this for consolidation)
-    let workingMemorySlots = 0;
-    let sensoryEventCount = 0;
-    try {
-      const wmState = await workingMemory.getState(projectName, sessionId);
-      workingMemorySlots = wmState.slots.length;
-      sensoryEventCount = await sensoryBuffer.getLength(projectName, sessionId);
-      if (workingMemorySlots > 0) {
-        logger.info(`Session ${sessionId} working memory: ${workingMemorySlots} slots, ${sensoryEventCount} sensory events`);
-      }
-    } catch {
-      // Non-critical
-    }
-
-    // Cleanup working memory and schedule sensory buffer TTL expiry
-    workingMemory.clear(projectName, sessionId).catch(() => {});
-    // Sensory buffer has its own TTL and will auto-expire
+    // Stale detection, working memory cleanup, and consolidation handled by
+    // session-lifecycle worker via session:ending event
+    const staleMemoriesCount = 0;
+    const workingMemorySlots = 0;
+    const sensoryEventCount = 0;
 
     const result: SessionSummary = {
       sessionId,
@@ -431,7 +406,7 @@ class SessionContextService {
         filter: filter.must.length > 0 ? filter : undefined,
       });
 
-      return results.points.map(p => ({
+      return results.points.map((p) => ({
         sessionId: (p.payload as any).sessionId,
         startedAt: (p.payload as any).startedAt,
         status: (p.payload as any).status,
@@ -447,26 +422,6 @@ class SessionContextService {
   // ============================================
   // Private Helpers
   // ============================================
-
-  /**
-   * Trigger predictive prefetch in the background (fire-and-forget)
-   */
-  private async triggerPredictivePrefetch(context: SessionContext): Promise<void> {
-    const predictions = await predictiveLoader.predict(
-      context.projectName,
-      context.sessionId,
-      {
-        currentFiles: context.currentFiles,
-        recentQueries: context.recentQueries,
-        toolsUsed: context.toolsUsed,
-        activeFeatures: context.activeFeatures,
-      }
-    );
-
-    if (predictions.length > 0) {
-      await predictiveLoader.prefetch(context.projectName, context.sessionId, predictions);
-    }
-  }
 
   /**
    * Build a session briefing with project profile + developer profile + recalled context.
@@ -488,10 +443,21 @@ class SessionContextService {
     try {
       const devProfile = await usagePatterns.buildDeveloperProfile(context.projectName);
       if (devProfile.totalToolCalls > 0) {
-        const topFiles = devProfile.frequentFiles.slice(0, 5).map(f => f.file).join(', ');
-        const topTools = devProfile.preferredTools.slice(0, 3).map(t => t.tool).join(', ');
-        const peakHrs = devProfile.peakHours.slice(0, 2).map(h => `${h.hour}:00`).join(', ');
-        parts.push(`Developer: ${devProfile.totalSessions} sessions, top files: ${topFiles}, top tools: ${topTools}, peak hours: ${peakHrs}`);
+        const topFiles = devProfile.frequentFiles
+          .slice(0, 5)
+          .map((f) => f.file)
+          .join(', ');
+        const topTools = devProfile.preferredTools
+          .slice(0, 3)
+          .map((t) => t.tool)
+          .join(', ');
+        const peakHrs = devProfile.peakHours
+          .slice(0, 2)
+          .map((h) => `${h.hour}:00`)
+          .join(', ');
+        parts.push(
+          `Developer: ${devProfile.totalSessions} sessions, top files: ${topFiles}, top tools: ${topTools}, peak hours: ${peakHrs}`
+        );
       }
     } catch {
       // Non-critical
@@ -508,7 +474,7 @@ class SessionContextService {
           type: 'all',
         });
 
-        const relevant = memories.filter(m => m.score >= 0.6);
+        const relevant = memories.filter((m) => m.score >= 0.6);
         if (relevant.length > 0) {
           parts.push('Relevant context:');
           for (const m of relevant.slice(0, 5)) {
@@ -521,31 +487,6 @@ class SessionContextService {
     }
 
     return parts.length > 0 ? parts.join('\n') : null;
-  }
-
-  /**
-   * Trigger auto-merge of similar durable memories (fire-and-forget).
-   * Runs at most once per hour per project via simple time tracking.
-   */
-  private lastMergeTime = new Map<string, number>();
-
-  private async triggerAutoMerge(projectName: string): Promise<void> {
-    const lastMerge = this.lastMergeTime.get(projectName) || 0;
-    if (Date.now() - lastMerge < 60 * 60 * 1000) return; // Skip if merged < 1h ago
-
-    this.lastMergeTime.set(projectName, Date.now());
-
-    const result = await memoryService.mergeMemories({
-      projectName,
-      type: 'all',
-      threshold: 0.9,
-      dryRun: false,
-      limit: 50,
-    });
-
-    if (result.totalMerged > 0) {
-      logger.info(`Auto-merged ${result.totalMerged} memory clusters on session start`, { project: projectName });
-    }
   }
 
   /**
@@ -602,9 +543,7 @@ class SessionContextService {
             { key: 'status', match: { value: 'ended' } },
             { key: 'status', match: { value: 'active' } },
           ],
-          must: [
-            { key: 'startedAt', range: { gte: cutoff } },
-          ],
+          must: [{ key: 'startedAt', range: { gte: cutoff } }],
         },
       });
 
@@ -612,7 +551,7 @@ class SessionContextService {
 
       // Sort by startedAt desc and return the most recent
       const sorted = results.points
-        .map(p => p.payload as unknown as SessionContext)
+        .map((p) => p.payload as unknown as SessionContext)
         .sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime());
 
       return sorted[0]?.sessionId || null;
@@ -720,9 +659,7 @@ class SessionContextService {
         ...context.recentQueries.slice(-5),
       ].join(' ');
 
-      const embedding = await embeddingService.embed(
-        contextText || `session ${context.sessionId}`
-      );
+      const embedding = await embeddingService.embed(contextText || `session ${context.sessionId}`);
 
       const point: VectorPoint = {
         id: context.sessionId,

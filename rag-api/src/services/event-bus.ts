@@ -21,7 +21,28 @@ export type EventType =
   | 'tribunal:rebuttal'
   | 'tribunal:verdict'
   | 'tribunal:completed'
-  | 'tribunal:failed';
+  | 'tribunal:failed'
+  // Domain events
+  | 'memory:created'
+  | 'memory:recalled'
+  | 'memory:deleted'
+  | 'memory:superseded'
+  | 'memory:promoted'
+  | 'memory:merged'
+  | 'session:started'
+  | 'session:activity'
+  | 'session:ending'
+  | 'session:ended'
+  | 'index:started'
+  | 'index:completed'
+  | 'index:failed'
+  | 'consolidation:started'
+  | 'consolidation:completed'
+  | 'consolidation:failed'
+  | 'maintenance:cycle.started'
+  | 'maintenance:cycle.completed'
+  | 'maintenance:dedup.completed'
+  | 'sensory:appended';
 
 export interface BusEvent {
   type: EventType;

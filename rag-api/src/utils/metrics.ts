@@ -349,6 +349,32 @@ export const qualityGateDuration = new Histogram({
 });
 
 // ============================================
+// Event-Driven Architecture Metrics
+// ============================================
+
+export const eventEmittedTotal = new Counter({
+  name: 'rag_event_emitted_total',
+  help: 'Total events published',
+  labelNames: ['event_type'],
+  registers: [registry],
+});
+
+export const eventProcessedTotal = new Counter({
+  name: 'rag_event_processed_total',
+  help: 'Total events processed by workers',
+  labelNames: ['queue', 'event_type', 'status'],
+  registers: [registry],
+});
+
+export const eventProcessingDuration = new Histogram({
+  name: 'rag_event_processing_duration_seconds',
+  help: 'Time spent processing events in workers',
+  labelNames: ['queue', 'event_type'],
+  buckets: [0.01, 0.05, 0.1, 0.5, 1, 2, 5, 10, 30],
+  registers: [registry],
+});
+
+// ============================================
 // Helper Functions
 // ============================================
 
@@ -364,7 +390,10 @@ export function recordHttpRequest(
 ) {
   const normalizedPath = normalizePath(path);
   httpRequestsTotal.inc({ method, path: normalizedPath, status, project: project || 'unknown' });
-  httpRequestDuration.observe({ method, path: normalizedPath, project: project || 'unknown' }, durationMs / 1000);
+  httpRequestDuration.observe(
+    { method, path: normalizedPath, project: project || 'unknown' },
+    durationMs / 1000
+  );
 }
 
 /**

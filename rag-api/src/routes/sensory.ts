@@ -10,6 +10,7 @@ import { asyncHandler } from '../middleware/async-handler';
 import { validate, validateProjectName, sensoryAppendSchema } from '../utils/validation';
 import { sensoryBuffer, computeSalience } from '../services/sensory-buffer';
 import { workingMemory } from '../services/working-memory';
+import { publishEvent } from '../events/emitter';
 
 const router = Router();
 
@@ -20,57 +21,84 @@ const router = Router();
  * Called fire-and-forget from MCP tool-middleware.
  * POST /api/sensory/append
  */
-router.post('/sensory/append', validateProjectName, validate(sensoryAppendSchema), asyncHandler(async (req: Request, res: Response) => {
-  const { projectName, sessionId, toolName, inputSummary, outputSummary, filesTouched, success, durationMs } = req.body;
+router.post(
+  '/sensory/append',
+  validateProjectName,
+  validate(sensoryAppendSchema),
+  asyncHandler(async (req: Request, res: Response) => {
+    const {
+      projectName,
+      sessionId,
+      toolName,
+      inputSummary,
+      outputSummary,
+      filesTouched,
+      success,
+      durationMs,
+    } = req.body;
 
-  const salience = computeSalience(toolName, success);
-  const event = {
-    toolName,
-    inputSummary,
-    outputSummary,
-    filesTouched,
-    success,
-    durationMs,
-    salience,
-    timestamp: new Date().toISOString(),
-  };
+    const salience = computeSalience(toolName, success);
+    const event = {
+      toolName,
+      inputSummary,
+      outputSummary,
+      filesTouched,
+      success,
+      durationMs,
+      salience,
+      timestamp: new Date().toISOString(),
+    };
 
-  // Append to sensory buffer
-  await sensoryBuffer.append(projectName, sessionId, event);
+    // Append to sensory buffer (durable write)
+    await sensoryBuffer.append(projectName, sessionId, event);
 
-  // Attention filter: promote salient events to working memory
-  await workingMemory.processEvent(projectName, sessionId, event);
+    // Emit event for async working memory processing
+    publishEvent('sensory:appended', {
+      projectName,
+      sessionId,
+      eventType: event.toolName,
+      value: event,
+    }).catch(() => {});
 
-  res.json({ success: true, salience });
-}));
+    res.json({ success: true, salience });
+  })
+);
 
 /**
  * Read sensory buffer events for a session.
  * GET /api/sensory/:sessionId
  */
-router.get('/sensory/:sessionId', validateProjectName, asyncHandler(async (req: Request, res: Response) => {
-  const { projectName } = req.body;
-  const { sessionId } = req.params;
-  const count = parseInt(req.query.count as string || '100', 10);
-  const since = req.query.since as string | undefined;
+router.get(
+  '/sensory/:sessionId',
+  validateProjectName,
+  asyncHandler(async (req: Request, res: Response) => {
+    const { projectName } = req.body;
+    const { sessionId } = req.params;
+    const count = parseInt((req.query.count as string) || '100', 10);
+    const since = req.query.since as string | undefined;
 
-  const events = await sensoryBuffer.read(projectName, sessionId, { count, since });
+    const events = await sensoryBuffer.read(projectName, sessionId, { count, since });
 
-  res.json({ events, count: events.length });
-}));
+    res.json({ events, count: events.length });
+  })
+);
 
 /**
  * Get sensory buffer statistics.
  * GET /api/sensory/:sessionId/stats
  */
-router.get('/sensory/:sessionId/stats', validateProjectName, asyncHandler(async (req: Request, res: Response) => {
-  const { projectName } = req.body;
-  const { sessionId } = req.params;
+router.get(
+  '/sensory/:sessionId/stats',
+  validateProjectName,
+  asyncHandler(async (req: Request, res: Response) => {
+    const { projectName } = req.body;
+    const { sessionId } = req.params;
 
-  const stats = await sensoryBuffer.getStats(projectName, sessionId);
+    const stats = await sensoryBuffer.getStats(projectName, sessionId);
 
-  res.json(stats);
-}));
+    res.json(stats);
+  })
+);
 
 // ── Working Memory ────────────────────────────────────────
 
@@ -78,13 +106,17 @@ router.get('/sensory/:sessionId/stats', validateProjectName, asyncHandler(async 
  * Get current working memory state for a session.
  * GET /api/working-memory/:sessionId
  */
-router.get('/working-memory/:sessionId', validateProjectName, asyncHandler(async (req: Request, res: Response) => {
-  const { projectName } = req.body;
-  const { sessionId } = req.params;
+router.get(
+  '/working-memory/:sessionId',
+  validateProjectName,
+  asyncHandler(async (req: Request, res: Response) => {
+    const { projectName } = req.body;
+    const { sessionId } = req.params;
 
-  const state = await workingMemory.getState(projectName, sessionId);
+    const state = await workingMemory.getState(projectName, sessionId);
 
-  res.json(state);
-}));
+    res.json(state);
+  })
+);
 
 export default router;
