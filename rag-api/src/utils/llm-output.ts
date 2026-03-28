@@ -14,9 +14,9 @@ import { logger } from './logger';
 
 export interface ParseResult<T> {
   data: T;
-  ok: boolean;          // true if parsed+validated successfully
-  raw?: string;         // original text (only on failure)
-  errors?: string[];    // validation errors (only on failure)
+  ok: boolean; // true if parsed+validated successfully
+  raw?: string; // original text (only on failure)
+  errors?: string[]; // validation errors (only on failure)
 }
 
 /**
@@ -31,7 +31,7 @@ export function parseLLMOutput<T>(
   text: string,
   schema: ZodSchema<T>,
   fallback: T,
-  label: string = 'llm-output',
+  label: string = 'llm-output'
 ): ParseResult<T> {
   // Step 1: Extract JSON from text
   const json = extractJSON(text);
@@ -55,7 +55,7 @@ export function parseLLMOutput<T>(
     return { data: result.data, ok: true };
   }
 
-  const errors = result.error.issues.map(i => `${i.path.join('.')}: ${i.message}`);
+  const errors = result.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`);
   logger.debug(`${label}: Zod validation failed`, { errors });
   return { data: fallback, ok: false, raw: text, errors };
 }
@@ -66,7 +66,7 @@ export function parseLLMOutput<T>(
 export function parseLLMOutputStrict<T>(
   text: string,
   schema: ZodSchema<T>,
-  label: string = 'llm-output',
+  label: string = 'llm-output'
 ): T {
   const result = parseLLMOutput(text, schema, undefined as T, label);
   if (!result.ok) {
@@ -99,9 +99,8 @@ function extractJSON(text: string): string | null {
   if (objStart === -1 && arrStart === -1) return null;
 
   // Pick the earlier occurrence
-  const start = objStart === -1 ? arrStart
-    : arrStart === -1 ? objStart
-    : Math.min(objStart, arrStart);
+  const start =
+    objStart === -1 ? arrStart : arrStart === -1 ? objStart : Math.min(objStart, arrStart);
 
   const isObj = trimmed[start] === '{';
   const closeChar = isObj ? '}' : ']';
@@ -125,13 +124,17 @@ export const routingSchema = z.object({
 export const codeReviewSchema = z.object({
   summary: z.string().default(''),
   score: z.coerce.number().min(1).max(10).default(5),
-  issues: z.array(z.object({
-    severity: z.enum(['critical', 'high', 'medium', 'low', 'info']).default('medium'),
-    type: z.string().default('general'),
-    description: z.string(),
-    line: z.string().optional(),
-    suggestion: z.string().optional(),
-  })).default([]),
+  issues: z
+    .array(
+      z.object({
+        severity: z.enum(['critical', 'high', 'medium', 'low', 'info']).default('medium'),
+        type: z.string().default('general'),
+        description: z.string(),
+        line: z.string().optional(),
+        suggestion: z.string().optional(),
+      })
+    )
+    .default([]),
   positives: z.array(z.string()).default([]),
   suggestions: z.array(z.string()).default([]),
 });
@@ -139,49 +142,70 @@ export const codeReviewSchema = z.object({
 /** Security review result */
 export const securityReviewSchema = z.object({
   riskLevel: z.enum(['critical', 'high', 'medium', 'low', 'none']).default('low'),
-  vulnerabilities: z.array(z.object({
-    type: z.string(),
-    severity: z.string(),
-    description: z.string(),
-    location: z.string().optional(),
-    impact: z.string().optional(),
-    remediation: z.string().optional(),
-  })).default([]),
+  vulnerabilities: z
+    .array(
+      z.object({
+        type: z.string(),
+        severity: z.string(),
+        description: z.string(),
+        location: z.string().optional(),
+        impact: z.string().optional(),
+        remediation: z.string().optional(),
+      })
+    )
+    .default([]),
   summary: z.string().default(''),
 });
 
 /** Complexity review result */
 export const complexityReviewSchema = z.object({
   complexity: z.enum(['low', 'medium', 'high', 'very-high']).default('medium'),
-  metrics: z.object({
-    estimatedCyclomaticComplexity: z.coerce.number().default(0),
-    nestingDepth: z.coerce.number().default(0),
-    functionsCount: z.coerce.number().default(0),
-    linesOfCode: z.coerce.number().default(0),
-  }).default({ estimatedCyclomaticComplexity: 0, nestingDepth: 0, functionsCount: 0, linesOfCode: 0 }),
+  metrics: z
+    .object({
+      estimatedCyclomaticComplexity: z.coerce.number().default(0),
+      nestingDepth: z.coerce.number().default(0),
+      functionsCount: z.coerce.number().default(0),
+      linesOfCode: z.coerce.number().default(0),
+    })
+    .default({
+      estimatedCyclomaticComplexity: 0,
+      nestingDepth: 0,
+      functionsCount: 0,
+      linesOfCode: 0,
+    }),
   hotspots: z.array(z.string()).default([]),
-  suggestions: z.array(z.object({
-    area: z.string(),
-    currentIssue: z.string(),
-    proposedChange: z.string(),
-  })).default([]),
+  suggestions: z
+    .array(
+      z.object({
+        area: z.string(),
+        currentIssue: z.string(),
+        proposedChange: z.string(),
+      })
+    )
+    .default([]),
 });
 
 /** Conversation analysis result */
 export const conversationAnalysisSchema = z.object({
-  learnings: z.array(z.object({
-    type: z.string(),
-    content: z.string(),
-    tags: z.array(z.string()).default([]),
-    relatedTo: z.string().optional(),
-    confidence: z.coerce.number().min(0).max(1).default(0.5),
-    reasoning: z.string().optional(),
-  })).default([]),
-  entities: z.object({
-    files: z.array(z.string()).default([]),
-    functions: z.array(z.string()).default([]),
-    concepts: z.array(z.string()).default([]),
-  }).default({ files: [], functions: [], concepts: [] }),
+  learnings: z
+    .array(
+      z.object({
+        type: z.string(),
+        content: z.string(),
+        tags: z.array(z.string()).default([]),
+        relatedTo: z.string().optional(),
+        confidence: z.coerce.number().min(0).max(1).default(0.5),
+        reasoning: z.string().optional(),
+      })
+    )
+    .default([]),
+  entities: z
+    .object({
+      files: z.array(z.string()).default([]),
+      functions: z.array(z.string()).default([]),
+      concepts: z.array(z.string()).default([]),
+    })
+    .default({ files: [], functions: [], concepts: [] }),
   summary: z.string().default(''),
 });
 
@@ -191,4 +215,30 @@ export const explainCodeSchema = z.object({
   purpose: z.string().default(''),
   keyComponents: z.array(z.string()).default([]),
   dependencies: z.array(z.string()).default([]),
+});
+
+/** Typed fact categories for human-memory extraction */
+export const factCategorySchema = z.enum([
+  'personal_info',
+  'preference',
+  'event',
+  'temporal',
+  'update',
+  'plan',
+]);
+export type FactCategory = z.infer<typeof factCategorySchema>;
+
+/** Single structured fact extracted from a conversation */
+export const structuredFactSchema = z.object({
+  category: factCategorySchema,
+  content: z.string(),
+  entities: z.array(z.string()).default([]),
+  date: z.string().optional(),
+  supersedes: z.string().nullable().optional(),
+});
+export type StructuredFactItem = z.infer<typeof structuredFactSchema>;
+
+/** Structured fact extraction result */
+export const structuredFactExtractionSchema = z.object({
+  facts: z.array(structuredFactSchema).default([]),
 });

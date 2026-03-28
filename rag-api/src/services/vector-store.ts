@@ -47,30 +47,35 @@ export interface CollectionInfo {
 }
 
 // Payload fields to index for fast filtering
-const INDEXED_FIELDS: Array<{ fieldName: string; type: 'keyword' | 'integer' | 'float' | 'bool' }> = [
-  { fieldName: 'language', type: 'keyword' },
-  { fieldName: 'file', type: 'keyword' },
-  { fieldName: 'type', type: 'keyword' },
-  { fieldName: 'spaceKey', type: 'keyword' },
-  { fieldName: 'project', type: 'keyword' },
-  { fieldName: 'pageId', type: 'keyword' },
-  { fieldName: 'source', type: 'keyword' },
-  { fieldName: 'validated', type: 'keyword' },
-  { fieldName: 'symbols', type: 'keyword' },
-  { fieldName: 'chunkType', type: 'keyword' },
-  { fieldName: 'fromFile', type: 'keyword' },
-  { fieldName: 'toFile', type: 'keyword' },
-  { fieldName: 'edgeType', type: 'keyword' },
-  { fieldName: 'layer', type: 'keyword' },
-  { fieldName: 'service', type: 'keyword' },
-  { fieldName: 'gitCommit', type: 'keyword' },
-  // Phase 2: LTM fields
-  { fieldName: 'sessionId', type: 'keyword' },
-  { fieldName: 'subtype', type: 'keyword' },
-  { fieldName: 'memoryLayer', type: 'keyword' },
-  { fieldName: 'accessCount', type: 'integer' },
-  { fieldName: 'stability', type: 'float' },
-];
+const INDEXED_FIELDS: Array<{ fieldName: string; type: 'keyword' | 'integer' | 'float' | 'bool' }> =
+  [
+    { fieldName: 'language', type: 'keyword' },
+    { fieldName: 'file', type: 'keyword' },
+    { fieldName: 'type', type: 'keyword' },
+    { fieldName: 'spaceKey', type: 'keyword' },
+    { fieldName: 'project', type: 'keyword' },
+    { fieldName: 'pageId', type: 'keyword' },
+    { fieldName: 'source', type: 'keyword' },
+    { fieldName: 'validated', type: 'keyword' },
+    { fieldName: 'symbols', type: 'keyword' },
+    { fieldName: 'chunkType', type: 'keyword' },
+    { fieldName: 'fromFile', type: 'keyword' },
+    { fieldName: 'toFile', type: 'keyword' },
+    { fieldName: 'edgeType', type: 'keyword' },
+    { fieldName: 'layer', type: 'keyword' },
+    { fieldName: 'service', type: 'keyword' },
+    { fieldName: 'gitCommit', type: 'keyword' },
+    // Phase 2: LTM fields
+    { fieldName: 'sessionId', type: 'keyword' },
+    { fieldName: 'subtype', type: 'keyword' },
+    { fieldName: 'memoryLayer', type: 'keyword' },
+    { fieldName: 'accessCount', type: 'integer' },
+    { fieldName: 'stability', type: 'float' },
+    // Structured fact extraction fields
+    { fieldName: 'factCategory', type: 'keyword' },
+    { fieldName: 'factEntities', type: 'keyword' },
+    { fieldName: 'factDateTs', type: 'integer' },
+  ];
 
 class VectorStoreService {
   private client: QdrantClient;
@@ -103,7 +108,7 @@ class VectorStoreService {
   private async isAlias(name: string): Promise<{ isAlias: boolean; collection?: string }> {
     try {
       const aliases = await this.listAliases();
-      const found = aliases.find(a => a.alias === name);
+      const found = aliases.find((a) => a.alias === name);
       return found ? { isAlias: true, collection: found.collection } : { isAlias: false };
     } catch {
       return { isAlias: false };
@@ -136,7 +141,7 @@ class VectorStoreService {
   async ensureCollection(name: string): Promise<void> {
     try {
       const collections = await this.client.getCollections();
-      const exists = collections.collections.some(c => c.name === name);
+      const exists = collections.collections.some((c) => c.name === name);
 
       if (!exists) {
         // An alias with this name blocks collection creation — clean it up
@@ -177,7 +182,9 @@ class VectorStoreService {
       } catch (error: any) {
         // Index might already exist, that's ok
         if (!error.message?.includes('already exists')) {
-          logger.warn(`Failed to create index on ${collection}.${field.fieldName}`, { error: error.message });
+          logger.warn(`Failed to create index on ${collection}.${field.fieldName}`, {
+            error: error.message,
+          });
         }
       }
     }
@@ -218,7 +225,7 @@ class VectorStoreService {
    */
   async listCollections(): Promise<string[]> {
     const collections = await this.client.getCollections();
-    return collections.collections.map(c => c.name);
+    return collections.collections.map((c) => c.name);
   }
 
   /**
@@ -227,7 +234,7 @@ class VectorStoreService {
   async listProjectCollections(projectName: string): Promise<string[]> {
     const collections = await this.listCollections();
     const prefix = `${projectName}_`;
-    return collections.filter(c => c.startsWith(prefix));
+    return collections.filter((c) => c.startsWith(prefix));
   }
 
   /**
@@ -268,7 +275,10 @@ class VectorStoreService {
           distance,
         },
         segmentsCount: info.segments_count,
-        optimizerStatus: typeof info.optimizer_status === 'object' ? (info.optimizer_status as any)?.status : undefined,
+        optimizerStatus:
+          typeof info.optimizer_status === 'object'
+            ? (info.optimizer_status as any)?.status
+            : undefined,
       };
     } catch (error: any) {
       if (error.status === 404) {
@@ -284,7 +294,7 @@ class VectorStoreService {
   async upsert(collection: string, points: VectorPoint[]): Promise<void> {
     await this.ensureCollection(collection);
 
-    const formattedPoints = points.map(p => ({
+    const formattedPoints = points.map((p) => ({
       id: p.id || uuidv4(),
       vector: p.vector,
       payload: p.payload,
@@ -309,7 +319,7 @@ class VectorStoreService {
   async ensureCollectionWithSparse(name: string): Promise<void> {
     try {
       const collections = await this.client.getCollections();
-      const exists = collections.collections.some(c => c.name === name);
+      const exists = collections.collections.some((c) => c.name === name);
 
       if (!exists) {
         // An alias with this name blocks collection creation — clean it up
@@ -344,7 +354,7 @@ class VectorStoreService {
   async upsertSparse(collection: string, points: SparseVectorPoint[]): Promise<void> {
     await this.ensureCollectionWithSparse(collection);
 
-    const formattedPoints = points.map(p => ({
+    const formattedPoints = points.map((p) => ({
       id: p.id || uuidv4(),
       vector: {
         dense: p.vectors.dense,
@@ -376,7 +386,7 @@ class VectorStoreService {
   async ensureCollectionWithBM25(name: string): Promise<void> {
     try {
       const collections = await this.client.getCollections();
-      const exists = collections.collections.some(c => c.name === name);
+      const exists = collections.collections.some((c) => c.name === name);
 
       if (!exists) {
         await this.resolveOrphanedAlias(name);
@@ -420,7 +430,7 @@ class VectorStoreService {
   ): Promise<void> {
     await this.ensureCollectionWithBM25(collection);
 
-    const formattedPoints = points.map(p => ({
+    const formattedPoints = points.map((p) => ({
       id: p.id || uuidv4(),
       vector: {
         dense: p.vector,
@@ -586,7 +596,7 @@ class VectorStoreService {
         with_payload: true,
         filter: filter as any,
       });
-      sparseResults = response.map(r => ({
+      sparseResults = response.map((r) => ({
         id: r.id as string,
         score: r.score,
         payload: r.payload as Record<string, unknown>,
@@ -646,7 +656,7 @@ class VectorStoreService {
         ...searchParams,
       });
 
-      return results.map(r => ({
+      return results.map((r) => ({
         id: r.id as string,
         score: r.score,
         payload: r.payload as Record<string, unknown>,
@@ -661,7 +671,7 @@ class VectorStoreService {
           vector,
           ...searchParams,
         });
-        return results.map(r => ({
+        return results.map((r) => ({
           id: r.id as string,
           score: r.score,
           payload: r.payload as Record<string, unknown>,
@@ -695,9 +705,9 @@ class VectorStoreService {
         score_threshold: scoreThreshold,
       });
 
-      return response.groups.map(group => ({
+      return response.groups.map((group) => ({
         group: String(group.id),
-        results: group.hits.map(hit => ({
+        results: group.hits.map((hit) => ({
           id: hit.id as string,
           score: hit.score,
           payload: hit.payload as Record<string, unknown>,
@@ -708,8 +718,16 @@ class VectorStoreService {
         return [];
       }
       // Fallback if groups API not supported - use regular search and group client-side
-      logger.warn('searchPointGroups failed, falling back to client-side grouping', { error: error.message });
-      const results = await this.search(collection, vector, limit * groupSize, filter, scoreThreshold);
+      logger.warn('searchPointGroups failed, falling back to client-side grouping', {
+        error: error.message,
+      });
+      const results = await this.search(
+        collection,
+        vector,
+        limit * groupSize,
+        filter,
+        scoreThreshold
+      );
       return this.groupResultsClientSide(results, groupBy, limit, groupSize);
     }
   }
@@ -788,7 +806,11 @@ class VectorStoreService {
   /**
    * Get faceted counts for a field (uses indexed field for efficiency)
    */
-  async getFacetCounts(collection: string, field: string, values: string[]): Promise<Record<string, number>> {
+  async getFacetCounts(
+    collection: string,
+    field: string,
+    values: string[]
+  ): Promise<Record<string, number>> {
     const counts: Record<string, number> = {};
 
     // Run count queries in parallel for each value
@@ -850,7 +872,12 @@ class VectorStoreService {
   /**
    * Scroll collection with optional vectors for frontend visualization
    */
-  async scrollCollection(collection: string, limit = 100, offset?: string, withVectors = false): Promise<{
+  async scrollCollection(
+    collection: string,
+    limit = 100,
+    offset?: string,
+    withVectors = false
+  ): Promise<{
     points: Array<{ id: string | number; payload: Record<string, unknown>; vector?: number[] }>;
     nextOffset?: string | number;
   }> {
@@ -865,7 +892,11 @@ class VectorStoreService {
       const points = response.points.map((p: any) => ({
         id: p.id,
         payload: p.payload as Record<string, unknown>,
-        vector: withVectors ? (Array.isArray(p.vector) ? p.vector : p.vector?.dense || undefined) : undefined,
+        vector: withVectors
+          ? Array.isArray(p.vector)
+            ? p.vector
+            : p.vector?.dense || undefined
+          : undefined,
       }));
 
       return {
@@ -900,9 +931,29 @@ class VectorStoreService {
       // Get language counts using indexed facets
       // Common languages to check - uses indexed field
       const commonLanguages = [
-        'typescript', 'javascript', 'python', 'vue', 'html', 'css', 'scss',
-        'json', 'yaml', 'markdown', 'sql', 'shell', 'dockerfile', 'go',
-        'java', 'rust', 'c', 'cpp', 'csharp', 'php', 'ruby', 'swift', 'kotlin'
+        'typescript',
+        'javascript',
+        'python',
+        'vue',
+        'html',
+        'css',
+        'scss',
+        'json',
+        'yaml',
+        'markdown',
+        'sql',
+        'shell',
+        'dockerfile',
+        'go',
+        'java',
+        'rust',
+        'c',
+        'cpp',
+        'csharp',
+        'php',
+        'ruby',
+        'swift',
+        'kotlin',
       ];
       const languages = await this.getFacetCounts(collection, 'language', commonLanguages);
 
@@ -982,7 +1033,7 @@ class VectorStoreService {
           with_vector: false,
         });
 
-        const ids = response.points.map(p => p.id as string);
+        const ids = response.points.map((p) => p.id as string);
         if (ids.length > 0) {
           await this.delete(collection, ids);
         }
@@ -1008,9 +1059,7 @@ class VectorStoreService {
   async createAlias(aliasName: string, collectionName: string): Promise<void> {
     try {
       await this.client.updateCollectionAliases({
-        actions: [
-          { create_alias: { alias_name: aliasName, collection_name: collectionName } },
-        ],
+        actions: [{ create_alias: { alias_name: aliasName, collection_name: collectionName } }],
       });
       logger.info(`Created alias: ${aliasName} -> ${collectionName}`);
     } catch (error: any) {
@@ -1026,8 +1075,8 @@ class VectorStoreService {
     try {
       // Get current collection for the alias
       const collections = await this.client.getCollections();
-      const currentCollection = collections.collections.find(c =>
-        c.name === aliasName || (c as any).aliases?.includes(aliasName)
+      const currentCollection = collections.collections.find(
+        (c) => c.name === aliasName || (c as any).aliases?.includes(aliasName)
       );
 
       // Atomic swap: delete old alias and create new one in single operation
@@ -1049,9 +1098,7 @@ class VectorStoreService {
   async deleteAlias(aliasName: string): Promise<void> {
     try {
       await this.client.updateCollectionAliases({
-        actions: [
-          { delete_alias: { alias_name: aliasName } },
-        ],
+        actions: [{ delete_alias: { alias_name: aliasName } }],
       });
       logger.info(`Deleted alias: ${aliasName}`);
     } catch (error: any) {
@@ -1113,7 +1160,7 @@ class VectorStoreService {
 
         clusters.push({
           seedId,
-          similar: results.map(r => ({
+          similar: results.map((r) => ({
             id: r.id as string,
             score: r.score,
             payload: r.payload as Record<string, unknown>,
@@ -1157,21 +1204,23 @@ class VectorStoreService {
 
           const rawVector = point.vector;
           const vector = Array.isArray(rawVector)
-            ? rawVector as number[]
-            : (rawVector as any)?.dense as number[] | undefined;
+            ? (rawVector as number[])
+            : ((rawVector as any)?.dense as number[] | undefined);
           if (!vector || !Array.isArray(vector)) continue;
 
           // Find similar vectors
           const similar = await this.search(collection, vector, 5, undefined, threshold);
 
           // Filter out self and already processed
-          const dupes = similar.filter(s =>
-            s.id !== point.id && !processed.has(s.id)
-          );
+          const dupes = similar.filter((s) => s.id !== point.id && !processed.has(s.id));
 
           if (dupes.length > 0) {
             const group = [
-              { id: point.id as string, score: 1, payload: point.payload as Record<string, unknown> },
+              {
+                id: point.id as string,
+                score: 1,
+                payload: point.payload as Record<string, unknown>,
+              },
               ...dupes,
             ];
             duplicates.push({
@@ -1180,7 +1229,7 @@ class VectorStoreService {
             });
 
             // Mark all as processed
-            group.forEach(g => processed.add(g.id));
+            group.forEach((g) => processed.add(g.id));
           }
 
           processed.add(point.id as string);
@@ -1218,7 +1267,7 @@ class VectorStoreService {
         filter: filter as any,
       });
 
-      return results.map(r => ({
+      return results.map((r) => ({
         id: r.id as string,
         score: r.score,
         payload: r.payload as Record<string, unknown>,
@@ -1228,6 +1277,69 @@ class VectorStoreService {
         return [];
       }
       throw error;
+    }
+  }
+
+  /**
+   * Keyword search via Qdrant scroll with text-match filtering on the 'content' field.
+   * Scores each result by how many of the supplied keywords appear in its content.
+   * Returns results sorted by match count (descending), with a synthetic score in [0, 1].
+   */
+  async searchByKeywords(
+    collection: string,
+    keywords: string[],
+    limit: number,
+    filter?: Record<string, unknown>
+  ): Promise<SearchResult[]> {
+    if (keywords.length === 0) return [];
+
+    try {
+      // Build a Qdrant text-match filter — must contain at least one keyword
+      const textConditions = keywords.map((kw) => ({
+        key: 'content',
+        match: { text: kw },
+      }));
+
+      const keywordFilter: Record<string, unknown> = {
+        should: textConditions,
+      };
+
+      // Merge with caller-supplied filter using must
+      const combinedFilter: Record<string, unknown> =
+        filter && Object.keys(filter).length > 0
+          ? { must: [filter, keywordFilter] }
+          : keywordFilter;
+
+      // Scroll to retrieve matching points (no vector needed)
+      const response = await this.client.scroll(collection, {
+        limit: limit * 3,
+        with_payload: true,
+        with_vector: false,
+        filter: combinedFilter as any,
+      });
+
+      // Score by number of keywords found in content
+      const results: SearchResult[] = response.points
+        .map((point) => {
+          const content = String(
+            (point.payload as Record<string, unknown>).content || ''
+          ).toLowerCase();
+          const matchCount = keywords.filter((kw) => content.includes(kw.toLowerCase())).length;
+          return {
+            id: point.id as string,
+            score: matchCount / keywords.length,
+            payload: point.payload as Record<string, unknown>,
+          };
+        })
+        .filter((r) => r.score > 0)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, limit);
+
+      return results;
+    } catch (error: any) {
+      if (error.status === 404) return [];
+      logger.debug('Keyword search failed', { error: error.message, collection });
+      return [];
     }
   }
 
@@ -1296,7 +1408,9 @@ class VectorStoreService {
   /**
    * List snapshots for a collection
    */
-  async listSnapshots(collection: string): Promise<Array<{ name: string; size: number; createdAt: string }>> {
+  async listSnapshots(
+    collection: string
+  ): Promise<Array<{ name: string; size: number; createdAt: string }>> {
     try {
       const snapshots = await this.client.listSnapshots(collection);
       return snapshots.map((s: any) => ({
@@ -1374,10 +1488,11 @@ class VectorStoreService {
         memoryUsageBytes,
         diskUsageBytes,
         indexedFieldsCount: Object.keys((info.config?.params as any)?.payload_schema || {}).length,
-        optimizerStatus: typeof info.optimizer_status === 'object'
-          ? (info.optimizer_status as any).status || 'unknown'
-          : String(info.optimizer_status || 'ok'),
-        quantizationEnabled: !!(info.config?.quantization_config),
+        optimizerStatus:
+          typeof info.optimizer_status === 'object'
+            ? (info.optimizer_status as any).status || 'unknown'
+            : String(info.optimizer_status || 'ok'),
+        quantizationEnabled: !!info.config?.quantization_config,
         languageBreakdown: stats.languages,
         fileCount: stats.totalFiles,
         lastIndexed: stats.lastIndexed,

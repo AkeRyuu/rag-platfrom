@@ -14,13 +14,33 @@ import { spreadingActivation, type ActivatedMemory } from './spreading-activatio
 import { logger } from '../utils/logger';
 import config from '../config';
 
-export type MemoryType = 'decision' | 'insight' | 'context' | 'todo' | 'conversation' | 'note' | 'procedure';
+export type MemoryType =
+  | 'decision'
+  | 'insight'
+  | 'context'
+  | 'todo'
+  | 'conversation'
+  | 'note'
+  | 'procedure';
 export type MemorySource = 'manual' | 'auto_conversation' | 'auto_pattern' | 'auto_feedback';
 export type TodoStatus = 'pending' | 'in_progress' | 'done' | 'cancelled';
+export type FactCategory =
+  | 'personal_info'
+  | 'preference'
+  | 'event'
+  | 'temporal'
+  | 'update'
+  | 'plan';
 
 export type MemoryRelationType =
-  | 'supersedes' | 'relates_to' | 'contradicts' | 'extends'
-  | 'caused_by' | 'follow_up' | 'refines' | 'alternative_to';
+  | 'supersedes'
+  | 'relates_to'
+  | 'contradicts'
+  | 'extends'
+  | 'caused_by'
+  | 'follow_up'
+  | 'refines'
+  | 'alternative_to';
 
 export interface MemoryRelation {
   targetId: string;
@@ -48,6 +68,10 @@ export interface Memory {
   // Relationships
   relationships?: MemoryRelation[];
   supersededBy?: string; // ID of memory that supersedes this one
+  // Structured fact fields (typed-category extraction)
+  factCategory?: FactCategory;
+  factEntities?: string[];
+  factDateTs?: number; // Unix timestamp (seconds) for date-range filtering
 }
 
 export interface MemorySearchResult {
@@ -62,6 +86,17 @@ export interface CreateMemoryOptions {
   tags?: string[];
   relatedTo?: string;
   metadata?: Record<string, unknown>;
+  // Structured fact fields
+  factCategory?: FactCategory;
+  factEntities?: string[];
+  factDateTs?: number; // Unix timestamp (seconds)
+}
+
+export interface TemporalConstraint {
+  op: 'first' | 'last' | 'before' | 'after' | 'between' | 'current' | 'none';
+  date?: string;
+  dateEnd?: string;
+  orderBy?: 'asc' | 'desc';
 }
 
 export interface SearchMemoryOptions {
@@ -70,9 +105,10 @@ export interface SearchMemoryOptions {
   type?: MemoryType | 'all';
   limit?: number;
   tag?: string;
-  graphRecall?: boolean;  // Phase 4: enable spreading activation after vector search
-  ragFusion?: boolean;    // RAG-Fusion: multi-query + RRF merge
-  recencyBoost?: number;  // 0-1: weight for recency scoring (0=disabled)
+  graphRecall?: boolean; // Phase 4: enable spreading activation after vector search
+  ragFusion?: boolean; // RAG-Fusion: multi-query + RRF merge
+  recencyBoost?: number; // 0-1: weight for recency scoring (0=disabled)
+  multiStrategy?: boolean; // TEMPR: semantic + keyword + temporal strategies fused with RRF
 }
 
 export interface ListMemoryOptions {
@@ -80,6 +116,167 @@ export interface ListMemoryOptions {
   type?: MemoryType | 'all';
   tag?: string;
   limit?: number;
+}
+
+// ============================================
+// Multi-Strategy Recall Helpers
+// ============================================
+
+const STOPWORDS = new Set([
+  'the',
+  'a',
+  'an',
+  'is',
+  'was',
+  'are',
+  'were',
+  'do',
+  'did',
+  'does',
+  'what',
+  'where',
+  'when',
+  'how',
+  'who',
+  'which',
+  'my',
+  'i',
+  'me',
+  'to',
+  'of',
+  'in',
+  'for',
+  'on',
+  'with',
+  'at',
+  'by',
+  'from',
+  'that',
+  'this',
+  'it',
+  'and',
+  'or',
+  'but',
+  'not',
+  'have',
+  'has',
+  'had',
+  'be',
+  'been',
+  'about',
+  'any',
+  'all',
+  'so',
+  'if',
+  'then',
+  'than',
+  'into',
+  'up',
+]);
+
+function extractKeywords(query: string): string[] {
+  return query
+    .toLowerCase()
+    .split(/\W+/)
+    .filter((w) => w.length > 2 && !STOPWORDS.has(w));
+}
+
+function extractTemporalConstraint(query: string): TemporalConstraint {
+  const q = query.toLowerCase();
+
+  // "first X" — order ascending to get earliest
+  if (/\bfirst\b/.test(q)) {
+    return { op: 'first', orderBy: 'asc' };
+  }
+
+  // "last X" / "most recent X" / "latest X"
+  if (/\blast\b|\bmost recent\b|\blatest\b/.test(q)) {
+    return { op: 'last', orderBy: 'desc' };
+  }
+
+  // "current X" / "now" / "currently"
+  if (/\bcurrent\b|\bnow\b|\bcurrently\b/.test(q)) {
+    return { op: 'current', orderBy: 'desc' };
+  }
+
+  // "in YYYY" — full year range
+  const yearOnlyMatch = q.match(/\bin (\d{4})\b/);
+  if (yearOnlyMatch) {
+    const year = yearOnlyMatch[1];
+    return {
+      op: 'between',
+      date: `${year}-01-01T00:00:00.000Z`,
+      dateEnd: `${year}-12-31T23:59:59.999Z`,
+    };
+  }
+
+  // Month name patterns: "in January 2024", "January 2024"
+  const monthNames: Record<string, string> = {
+    january: '01',
+    february: '02',
+    march: '03',
+    april: '04',
+    may: '05',
+    june: '06',
+    july: '07',
+    august: '08',
+    september: '09',
+    october: '10',
+    november: '11',
+    december: '12',
+  };
+  const monthNameRe =
+    /\b(january|february|march|april|may|june|july|august|september|october|november|december)\s+(\d{4})\b/;
+  const monthNameMatch = q.match(monthNameRe);
+  if (monthNameMatch) {
+    const month = monthNames[monthNameMatch[1]];
+    const year = monthNameMatch[2];
+    const lastDay = new Date(Number(year), Number(month), 0).getDate();
+    return {
+      op: 'between',
+      date: `${year}-${month}-01T00:00:00.000Z`,
+      dateEnd: `${year}-${month}-${String(lastDay).padStart(2, '0')}T23:59:59.999Z`,
+    };
+  }
+
+  // "before YYYY-MM" or "before Month YYYY"
+  const beforeMonthMatch = q.match(/\bbefore\s+(\d{4}-\d{2})\b/);
+  if (beforeMonthMatch) {
+    return { op: 'before', date: `${beforeMonthMatch[1]}-01T00:00:00.000Z` };
+  }
+  const beforeMonthNameMatch = q.match(
+    /\bbefore\s+(january|february|march|april|may|june|july|august|september|october|november|december)\s+(\d{4})\b/
+  );
+  if (beforeMonthNameMatch) {
+    const month = monthNames[beforeMonthNameMatch[1]];
+    return { op: 'before', date: `${beforeMonthNameMatch[2]}-${month}-01T00:00:00.000Z` };
+  }
+
+  // "after YYYY-MM" or "after Month YYYY"
+  const afterMonthMatch = q.match(/\bafter\s+(\d{4}-\d{2})\b/);
+  if (afterMonthMatch) {
+    return { op: 'after', date: `${afterMonthMatch[1]}-01T00:00:00.000Z` };
+  }
+  const afterMonthNameMatch = q.match(
+    /\bafter\s+(january|february|march|april|may|june|july|august|september|october|november|december)\s+(\d{4})\b/
+  );
+  if (afterMonthNameMatch) {
+    const month = monthNames[afterMonthNameMatch[1]];
+    return { op: 'after', date: `${afterMonthNameMatch[2]}-${month}-01T00:00:00.000Z` };
+  }
+
+  // Bare YYYY-MM-DD date in query
+  const isoDateMatch = q.match(/\b(\d{4}-\d{2}-\d{2})\b/);
+  if (isoDateMatch) {
+    const d = isoDateMatch[1];
+    return {
+      op: 'between',
+      date: `${d}T00:00:00.000Z`,
+      dateEnd: `${d}T23:59:59.999Z`,
+    };
+  }
+
+  return { op: 'none' };
 }
 
 class MemoryService {
@@ -91,7 +288,17 @@ class MemoryService {
    * Store a new memory
    */
   async remember(options: CreateMemoryOptions): Promise<Memory> {
-    const { projectName, content, type = 'note', tags = [], relatedTo, metadata } = options;
+    const {
+      projectName,
+      content,
+      type = 'note',
+      tags = [],
+      relatedTo,
+      metadata,
+      factCategory,
+      factEntities,
+      factDateTs,
+    } = options;
     const collectionName = this.getCollectionName(projectName);
 
     const memory: Memory = {
@@ -103,6 +310,9 @@ class MemoryService {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       metadata,
+      factCategory,
+      factEntities,
+      factDateTs,
     };
 
     // Add todo-specific fields
@@ -122,7 +332,7 @@ class MemoryService {
       if (relationships.length > 0) {
         memory.relationships = relationships;
         // Mark superseded memories
-        for (const rel of relationships.filter(r => r.type === 'supersedes')) {
+        for (const rel of relationships.filter((r) => r.type === 'supersedes')) {
           await this.markSuperseded(collectionName, rel.targetId, memory.id);
         }
       }
@@ -141,18 +351,38 @@ class MemoryService {
 
     await vectorStore.upsert(collectionName, [point]);
 
-    logger.info(`Memory stored: ${type}`, { id: memory.id, project: projectName, relationships: memory.relationships?.length || 0 });
+    logger.info(`Memory stored: ${type}`, {
+      id: memory.id,
+      project: projectName,
+      relationships: memory.relationships?.length || 0,
+    });
     return memory;
   }
 
   /**
-   * Recall memories by semantic search
+   * Recall memories using multi-strategy retrieval with RRF fusion (TEMPR pipeline).
+   *
+   * When multiStrategy is true (default), runs up to 3 strategies in parallel:
+   *   1. Semantic vector search (always)
+   *   2. Keyword/text-match search (always)
+   *   3. Temporal filtered search (when query contains a date/temporal signal)
+   * Results from all strategies are merged via Reciprocal Rank Fusion before reranking.
    */
   async recall(options: SearchMemoryOptions): Promise<MemorySearchResult[]> {
-    const { projectName, query, type = 'all', limit = 5, tag, graphRecall, ragFusion, recencyBoost = 0 } = options;
+    const {
+      projectName,
+      query,
+      type = 'all',
+      limit = 5,
+      tag,
+      graphRecall,
+      ragFusion,
+      recencyBoost = 0,
+      multiStrategy = true,
+    } = options;
     const collectionName = this.getCollectionName(projectName);
 
-    // Build Qdrant filter
+    // Build Qdrant filter for type/tag constraints
     const mustConditions: Record<string, unknown>[] = [];
     if (type && type !== 'all') {
       mustConditions.push({ key: 'type', match: { value: type } });
@@ -162,10 +392,106 @@ class MemoryService {
     }
     const filter = mustConditions.length > 0 ? { must: mustConditions } : undefined;
 
-    let results;
+    let results: import('./vector-store').SearchResult[];
 
-    // RAG-Fusion path: multi-query + RRF merge
-    if (ragFusion && config.RAG_FUSION_ENABLED) {
+    if (multiStrategy) {
+      const { retrievalFusion } = await import('./retrieval-fusion');
+      const temporal = extractTemporalConstraint(query);
+      const keywords = extractKeywords(query);
+
+      // Strategy 1: Semantic (embed + vector search, or RAG-Fusion if enabled)
+      const semanticPromise: Promise<import('./vector-store').SearchResult[]> =
+        ragFusion && config.RAG_FUSION_ENABLED
+          ? retrievalFusion.fusedRecall(
+              query,
+              async (q: string) => {
+                const emb = config.EMBEDDING_INSTRUCTION_ENABLED
+                  ? await embeddingService.embedQuery(q, 'memory_recall')
+                  : await embeddingService.embed(q);
+                return vectorStore.search(collectionName, emb, limit * 2, filter);
+              },
+              limit * 3
+            )
+          : (async () => {
+              const emb = config.EMBEDDING_INSTRUCTION_ENABLED
+                ? await embeddingService.embedQuery(query, 'memory_recall')
+                : await embeddingService.embed(query);
+              return vectorStore.search(collectionName, emb, limit * 2, filter);
+            })();
+
+      // Strategy 2: Keyword text-match search
+      const keywordPromise: Promise<import('./vector-store').SearchResult[]> =
+        keywords.length > 0
+          ? vectorStore.searchByKeywords(collectionName, keywords, limit * 2, filter)
+          : Promise.resolve([]);
+
+      // Strategy 3: Temporal filtered semantic search (only when a temporal signal is detected)
+      const temporalPromise: Promise<import('./vector-store').SearchResult[]> =
+        temporal.op !== 'none'
+          ? (async () => {
+              const emb = config.EMBEDDING_INSTRUCTION_ENABLED
+                ? await embeddingService.embedQuery(query, 'memory_recall')
+                : await embeddingService.embed(query);
+
+              const temporalConditions: Record<string, unknown>[] = [...mustConditions];
+
+              if (temporal.op === 'before' && temporal.date) {
+                temporalConditions.push({ key: 'createdAt', range: { lt: temporal.date } });
+              } else if (temporal.op === 'after' && temporal.date) {
+                temporalConditions.push({ key: 'createdAt', range: { gt: temporal.date } });
+              } else if (temporal.op === 'between' && temporal.date && temporal.dateEnd) {
+                temporalConditions.push({
+                  key: 'createdAt',
+                  range: { gte: temporal.date, lte: temporal.dateEnd },
+                });
+              }
+
+              const temporalFilter =
+                temporalConditions.length > 0 ? { must: temporalConditions } : undefined;
+
+              const candidates = await vectorStore.search(
+                collectionName,
+                emb,
+                limit * 3,
+                temporalFilter
+              );
+
+              if (temporal.orderBy) {
+                candidates.sort((a, b) => {
+                  const ta = new Date((a.payload.createdAt as string) || 0).getTime();
+                  const tb = new Date((b.payload.createdAt as string) || 0).getTime();
+                  return temporal.orderBy === 'asc' ? ta - tb : tb - ta;
+                });
+              }
+
+              return candidates.slice(0, limit * 2);
+            })()
+          : Promise.resolve([]);
+
+      const [semanticResults, keywordResults, temporalResults] = await Promise.all([
+        semanticPromise.catch((): import('./vector-store').SearchResult[] => []),
+        keywordPromise.catch((): import('./vector-store').SearchResult[] => []),
+        temporalPromise.catch((): import('./vector-store').SearchResult[] => []),
+      ]);
+
+      const strategyLists = [semanticResults, keywordResults, temporalResults].filter(
+        (l) => l.length > 0
+      );
+
+      results =
+        strategyLists.length > 1
+          ? retrievalFusion.reciprocalRankFusion(strategyLists, 60)
+          : (strategyLists[0] ?? []);
+
+      logger.debug('Multi-strategy recall', {
+        project: projectName,
+        semantic: semanticResults.length,
+        keyword: keywordResults.length,
+        temporal: temporalResults.length,
+        fused: results.length,
+        temporalOp: temporal.op,
+      });
+    } else if (ragFusion && config.RAG_FUSION_ENABLED) {
       const { retrievalFusion } = await import('./retrieval-fusion');
       results = await retrievalFusion.fusedRecall(
         query,
@@ -178,7 +504,6 @@ class MemoryService {
         limit * 3
       );
     } else {
-      // Standard path: single query
       const embedding = config.EMBEDDING_INSTRUCTION_ENABLED
         ? await embeddingService.embedQuery(query, 'memory_recall')
         : await embeddingService.embed(query);
@@ -193,8 +518,8 @@ class MemoryService {
     const THIRTY_DAYS = 30 * 24 * 60 * 60 * 1000;
 
     let mappedResults = results
-      .filter(r => !r.payload.supersededBy) // Exclude superseded memories
-      .map(r => {
+      .filter((r) => !r.payload.supersededBy) // Exclude superseded memories
+      .map((r) => {
         let score = r.score;
 
         // Memory aging: penalize memories older than 30 days without validation
@@ -203,13 +528,17 @@ class MemoryService {
           const ageMs = now - new Date(createdAt).getTime();
           if (ageMs > THIRTY_DAYS) {
             const validated = r.payload.validated as boolean | undefined;
-            const promoted = !!(r.payload.metadata as Record<string, unknown> | undefined)?.promotedAt;
+            const promoted = !!(r.payload.metadata as Record<string, unknown> | undefined)
+              ?.promotedAt;
             // Validated/promoted memories keep their score; others decay
             if (!validated && !promoted) {
               // Decay: configurable rate per 30 days past the first 30
               const periodsOld = Math.floor(ageMs / THIRTY_DAYS) - 1;
-              const decay = Math.min(config.MEMORY_DECAY_MAX, periodsOld * config.MEMORY_DECAY_RATE);
-              score *= (1 - decay);
+              const decay = Math.min(
+                config.MEMORY_DECAY_MAX,
+                periodsOld * config.MEMORY_DECAY_RATE
+              );
+              score *= 1 - decay;
             }
           }
         }
@@ -228,6 +557,9 @@ class MemoryService {
             statusHistory: r.payload.statusHistory as Memory['statusHistory'],
             relationships: r.payload.relationships as MemoryRelation[] | undefined,
             supersededBy: r.payload.supersededBy as string | undefined,
+            factCategory: r.payload.factCategory as FactCategory | undefined,
+            factEntities: r.payload.factEntities as string[] | undefined,
+            factDateTs: r.payload.factDateTs as number | undefined,
           },
           score,
         };
@@ -252,27 +584,29 @@ class MemoryService {
 
     // Fire-and-forget reconsolidation: strengthen recalled memories + track co-recalls
     if (config.RECONSOLIDATION_ENABLED && mappedResults.length > 0) {
-      reconsolidation.onRecall(
-        projectName,
-        mappedResults.map(r => ({
-          id: r.memory.id,
-          content: r.memory.content,
-          type: r.memory.type,
-          tags: r.memory.tags,
-          collection: 'durable' as const,
-        })),
-        query
-      ).catch(() => {});
+      reconsolidation
+        .onRecall(
+          projectName,
+          mappedResults.map((r) => ({
+            id: r.memory.id,
+            content: r.memory.content,
+            type: r.memory.type,
+            tags: r.memory.tags,
+            collection: 'durable' as const,
+          })),
+          query
+        )
+        .catch(() => {});
     }
 
     // Phase 4: Spreading activation — enrich results with graph-connected memories
     if (config.GRAPH_RECALL_ENABLED && graphRecall && mappedResults.length > 0) {
       try {
-        const seeds = mappedResults.map(r => ({ id: r.memory.id, activation: r.score }));
+        const seeds = mappedResults.map((r) => ({ id: r.memory.id, activation: r.score }));
         const activated = await spreadingActivation.activate(projectName, seeds);
 
         // Merge: add graph-discovered memories that weren't in vector search results
-        const existingIds = new Set(mappedResults.map(r => r.memory.id));
+        const existingIds = new Set(mappedResults.map((r) => r.memory.id));
         for (const act of activated) {
           if (existingIds.has(act.id) || act.hop === 0) continue;
           mappedResults.push({
@@ -289,6 +623,9 @@ class MemoryService {
               statusHistory: undefined,
               relationships: undefined,
               supersededBy: undefined,
+              factCategory: undefined,
+              factEntities: undefined,
+              factDateTs: undefined,
             },
             score: act.activation,
           });
@@ -298,7 +635,9 @@ class MemoryService {
         mappedResults.sort((a, b) => b.score - a.score);
         mappedResults = mappedResults.slice(0, limit);
       } catch (err: any) {
-        logger.debug('Spreading activation failed, returning vector-only results', { error: err.message });
+        logger.debug('Spreading activation failed, returning vector-only results', {
+          error: err.message,
+        });
       }
     }
 
@@ -328,14 +667,9 @@ class MemoryService {
 
     const filter = mustConditions.length > 0 ? { must: mustConditions } : undefined;
 
-    const results = await vectorStore.search(
-      collectionName,
-      embedding,
-      limit,
-      filter
-    );
+    const results = await vectorStore.search(collectionName, embedding, limit, filter);
 
-    return results.map(r => ({
+    return results.map((r) => ({
       id: r.id,
       type: r.payload.type as MemoryType,
       content: r.payload.content as string,
@@ -387,10 +721,13 @@ class MemoryService {
    * Delete memories older than N days (client-side date filtering).
    * tier: 'durable' (default) or 'quarantine' to target the pending collection.
    */
-  async forgetOlderThan(projectName: string, olderThanDays: number, tier: 'durable' | 'quarantine' = 'durable'): Promise<number> {
-    const collectionName = tier === 'quarantine'
-      ? `${projectName}_memory_pending`
-      : this.getCollectionName(projectName);
+  async forgetOlderThan(
+    projectName: string,
+    olderThanDays: number,
+    tier: 'durable' | 'quarantine' = 'durable'
+  ): Promise<number> {
+    const collectionName =
+      tier === 'quarantine' ? `${projectName}_memory_pending` : this.getCollectionName(projectName);
     const cutoff = new Date(Date.now() - olderThanDays * 24 * 60 * 60 * 1000).toISOString();
     let deleted = 0;
 
@@ -423,7 +760,9 @@ class MemoryService {
         offset = response.next_page_offset as string | number | undefined;
       } while (offset);
 
-      logger.info(`Deleted ${deleted} memories older than ${olderThanDays} days`, { project: projectName });
+      logger.info(`Deleted ${deleted} memories older than ${olderThanDays} days`, {
+        project: projectName,
+      });
       return deleted;
     } catch (error: any) {
       if (error.status === 404) return 0;
@@ -451,7 +790,7 @@ class MemoryService {
       limit: 10,
     });
 
-    const todo = results.find(r => r.memory.id === todoId);
+    const todo = results.find((r) => r.memory.id === todoId);
     if (!todo) {
       logger.warn(`Todo not found: ${todoId}`);
       return null;
@@ -531,7 +870,16 @@ class MemoryService {
     const textsToEmbed: string[] = [];
 
     for (const item of items) {
-      const { content, type = 'note', tags = [], relatedTo, metadata } = item;
+      const {
+        content,
+        type = 'note',
+        tags = [],
+        relatedTo,
+        metadata,
+        factCategory,
+        factEntities,
+        factDateTs,
+      } = item;
 
       const memory: Memory = {
         id: uuidv4(),
@@ -542,6 +890,9 @@ class MemoryService {
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         metadata,
+        factCategory,
+        factEntities,
+        factDateTs,
       };
 
       if (type === 'todo') {
@@ -585,7 +936,11 @@ class MemoryService {
   /**
    * Validate auto-extracted memory (mark as user-validated)
    */
-  async validateMemory(projectName: string, memoryId: string, validated: boolean): Promise<Memory | null> {
+  async validateMemory(
+    projectName: string,
+    memoryId: string,
+    validated: boolean
+  ): Promise<Memory | null> {
     const collectionName = this.getCollectionName(projectName);
 
     // Find the memory
@@ -644,16 +999,14 @@ class MemoryService {
     totalFound: number;
     totalMerged: number;
   }> {
-    const {
-      projectName,
-      type = 'all',
-      threshold = 0.9,
-      dryRun = true,
-      limit = 50,
-    } = options;
+    const { projectName, type = 'all', threshold = 0.9, dryRun = true, limit = 50 } = options;
 
     const collectionName = this.getCollectionName(projectName);
-    const result: { merged: Array<{ original: Memory[]; merged: Memory }>; totalFound: number; totalMerged: number } = {
+    const result: {
+      merged: Array<{ original: Memory[]; merged: Memory }>;
+      totalFound: number;
+      totalMerged: number;
+    } = {
       merged: [],
       totalFound: 0,
       totalMerged: 0,
@@ -680,7 +1033,10 @@ class MemoryService {
         });
 
         for (const point of response.points) {
-          memories.push({ id: point.id as string, payload: point.payload as Record<string, unknown> });
+          memories.push({
+            id: point.id as string,
+            payload: point.payload as Record<string, unknown>,
+          });
         }
 
         offset = response.next_page_offset as string | number | undefined;
@@ -700,12 +1056,7 @@ class MemoryService {
         if (processed.has(mem.id)) continue;
 
         try {
-          const similar = await vectorStore.recommend(
-            collectionName,
-            [mem.id],
-            [],
-            10
-          );
+          const similar = await vectorStore.recommend(collectionName, [mem.id], [], 10);
 
           const cluster: Memory[] = [this.pointToMemory(mem)];
           processed.add(mem.id);
@@ -745,7 +1096,7 @@ class MemoryService {
 
         const batch = clusters.slice(i, i + BATCH_SIZE);
         const mergeResults = await Promise.allSettled(
-          batch.map(cluster =>
+          batch.map((cluster) =>
             Promise.race([
               this.llmMergeMemories(cluster),
               new Promise<never>((_, reject) =>
@@ -760,21 +1111,24 @@ class MemoryService {
           const mergeResult = mergeResults[j];
 
           // On timeout/error, fallback to concatenation
-          const mergedContent = mergeResult.status === 'fulfilled'
-            ? mergeResult.value
-            : [...new Set(cluster.map(m => m.content.trim()))].join(' | ');
+          const mergedContent =
+            mergeResult.status === 'fulfilled'
+              ? mergeResult.value
+              : [...new Set(cluster.map((m) => m.content.trim()))].join(' | ');
 
           const mergedMemory: Memory = {
             id: uuidv4(),
             type: cluster[0].type,
             content: mergedContent,
-            tags: [...new Set(cluster.flatMap(m => m.tags))],
-            relatedTo: cluster.find(m => m.relatedTo)?.relatedTo,
-            createdAt: cluster.reduce((earliest, m) =>
-              m.createdAt < earliest ? m.createdAt : earliest, cluster[0].createdAt),
+            tags: [...new Set(cluster.flatMap((m) => m.tags))],
+            relatedTo: cluster.find((m) => m.relatedTo)?.relatedTo,
+            createdAt: cluster.reduce(
+              (earliest, m) => (m.createdAt < earliest ? m.createdAt : earliest),
+              cluster[0].createdAt
+            ),
             updatedAt: new Date().toISOString(),
             metadata: {
-              mergedFrom: cluster.map(m => m.id),
+              mergedFrom: cluster.map((m) => m.id),
               mergedAt: new Date().toISOString(),
               originalCount: cluster.length,
             },
@@ -787,13 +1141,15 @@ class MemoryService {
               `${mergedMemory.type}: ${mergedMemory.content}${mergedMemory.relatedTo ? ` (related to: ${mergedMemory.relatedTo})` : ''}`
             );
 
-            await vectorStore.upsert(collectionName, [{
-              id: mergedMemory.id,
-              vector: embedding,
-              payload: { ...mergedMemory, project: projectName },
-            }]);
+            await vectorStore.upsert(collectionName, [
+              {
+                id: mergedMemory.id,
+                vector: embedding,
+                payload: { ...mergedMemory, project: projectName },
+              },
+            ]);
 
-            const idsToDelete = cluster.map(m => m.id);
+            const idsToDelete = cluster.map((m) => m.id);
             await vectorStore.delete(collectionName, idsToDelete);
           }
 
@@ -801,7 +1157,10 @@ class MemoryService {
         }
       }
 
-      logger.info(`Memory merge: ${result.totalMerged} clusters${dryRun ? ' (dry run)' : ' merged'}`, { projectName });
+      logger.info(
+        `Memory merge: ${result.totalMerged} clusters${dryRun ? ' (dry run)' : ' merged'}`,
+        { projectName }
+      );
       return result;
     } catch (error: any) {
       if (error.status === 404) {
@@ -821,7 +1180,8 @@ class MemoryService {
       const result = await llm.complete(
         `Merge the following ${memories.length} related memory entries into a single, concise memory that preserves all unique information:\n\n${memoryTexts}`,
         {
-          systemPrompt: 'You are a memory consolidation assistant. Merge related memories into one concise entry. Preserve all unique facts, decisions, and insights. Remove redundancy. Output only the merged text, nothing else.',
+          systemPrompt:
+            'You are a memory consolidation assistant. Merge related memories into one concise entry. Preserve all unique facts, decisions, and insights. Remove redundancy. Output only the merged text, nothing else.',
           maxTokens: 500,
           temperature: 0.3,
           think: false,
@@ -863,6 +1223,9 @@ class MemoryService {
       validated: point.payload.validated as boolean | undefined,
       relationships: point.payload.relationships as MemoryRelation[] | undefined,
       supersededBy: point.payload.supersededBy as string | undefined,
+      factCategory: point.payload.factCategory as FactCategory | undefined,
+      factEntities: point.payload.factEntities as string[] | undefined,
+      factDateTs: point.payload.factDateTs as number | undefined,
     };
   }
 
@@ -887,7 +1250,7 @@ class MemoryService {
       try {
         const classified = await relationshipClassifier.classify(
           { content, type },
-          similar.map(r => ({
+          similar.map((r) => ({
             id: r.id,
             content: (r.payload.content as string) ?? '',
             type: (r.payload.type as string) ?? 'note',
@@ -895,14 +1258,16 @@ class MemoryService {
         );
 
         if (classified.length > 0) {
-          return classified.slice(0, 5).map(c => ({
+          return classified.slice(0, 5).map((c) => ({
             targetId: c.targetId,
             type: c.type as MemoryRelationType,
             reason: c.reason,
           }));
         }
       } catch (err: any) {
-        logger.debug('LLM relationship classification failed, falling back to threshold-based', { error: err.message });
+        logger.debug('LLM relationship classification failed, falling back to threshold-based', {
+          error: err.message,
+        });
       }
     }
 
@@ -921,7 +1286,9 @@ class MemoryService {
         });
       } else if (
         r.score > 0.8 &&
-        (contentLower.includes('not ') || contentLower.includes('instead') || contentLower.includes('wrong')) &&
+        (contentLower.includes('not ') ||
+          contentLower.includes('instead') ||
+          contentLower.includes('wrong')) &&
         existingType === type
       ) {
         relations.push({
@@ -944,7 +1311,11 @@ class MemoryService {
   /**
    * Mark an existing memory as superseded by a newer one.
    */
-  private async markSuperseded(collectionName: string, targetId: string, newId: string): Promise<void> {
+  private async markSuperseded(
+    collectionName: string,
+    targetId: string,
+    newId: string
+  ): Promise<void> {
     try {
       await vectorStore['client'].setPayload(collectionName, {
         points: [targetId],
@@ -973,16 +1344,14 @@ class MemoryService {
         embedding,
         limit * 2, // Get more to filter
         {
-          must: [
-            { key: 'validated', match: { value: false } },
-          ],
+          must: [{ key: 'validated', match: { value: false } }],
         }
       );
 
       return results
-        .filter(r => r.payload.source && (r.payload.source as string).startsWith('auto_'))
+        .filter((r) => r.payload.source && (r.payload.source as string).startsWith('auto_'))
         .slice(0, limit)
-        .map(r => ({
+        .map((r) => ({
           id: r.id,
           type: r.payload.type as MemoryType,
           content: r.payload.content as string,

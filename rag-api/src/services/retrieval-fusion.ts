@@ -59,10 +59,7 @@ class RetrievalFusionService {
    * Reciprocal Rank Fusion — merge multiple ranked lists into one.
    * RRF_score(doc) = Σ 1/(k + rank_i(doc)) for each list i
    */
-  reciprocalRankFusion<T extends FusionResult>(
-    rankedLists: T[][],
-    k: number = 60
-  ): T[] {
+  reciprocalRankFusion<T extends FusionResult>(rankedLists: T[][], k: number = 60): T[] {
     const scores = new Map<string, { score: number; result: T }>();
 
     for (const list of rankedLists) {
@@ -99,9 +96,7 @@ class RetrievalFusionService {
     const allQueries = [query, ...reformulations];
 
     // Parallel search for all queries
-    const allResults = await Promise.all(
-      allQueries.map(q => searchFn(q).catch(() => [] as T[]))
-    );
+    const allResults = await Promise.all(allQueries.map((q) => searchFn(q).catch(() => [] as T[])));
 
     // RRF merge
     const fused = this.reciprocalRankFusion(allResults);

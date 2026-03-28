@@ -9,11 +9,19 @@ import { Request, Response, NextFunction } from 'express';
 // Common Schemas
 // ============================================
 
-export const projectNameSchema = z.string().min(1).max(50).regex(/^[a-z0-9_-]+$/i, {
-  message: 'Project name must contain only alphanumeric characters, dashes, and underscores',
-});
+export const projectNameSchema = z
+  .string()
+  .min(1)
+  .max(50)
+  .regex(/^[a-z0-9_-]+$/i, {
+    message: 'Project name must contain only alphanumeric characters, dashes, and underscores',
+  });
 
-export const collectionNameSchema = z.string().min(1).max(100).regex(/^[a-z0-9_-]+$/i);
+export const collectionNameSchema = z
+  .string()
+  .min(1)
+  .max(100)
+  .regex(/^[a-z0-9_-]+$/i);
 
 export const limitSchema = z.number().int().min(1).max(100).default(5);
 
@@ -28,12 +36,14 @@ export const searchSchema = z.object({
   query: z.string().min(1).max(10000),
   limit: limitSchema.optional(),
   mode: searchModeSchema,
-  filters: z.object({
-    language: z.string().optional(),
-    path: z.string().optional(),
-    layer: z.string().optional(),
-    service: z.string().optional(),
-  }).optional(),
+  filters: z
+    .object({
+      language: z.string().optional(),
+      path: z.string().optional(),
+      layer: z.string().optional(),
+      service: z.string().optional(),
+    })
+    .optional(),
 });
 
 export const searchSimilarSchema = z.object({
@@ -74,10 +84,15 @@ export const indexSchema = z.object({
 
 export const indexUploadSchema = z.object({
   projectName: projectNameSchema.optional(),
-  files: z.array(z.object({
-    path: z.string().min(1),
-    content: z.string(),
-  })).min(1).max(100),
+  files: z
+    .array(
+      z.object({
+        path: z.string().min(1),
+        content: z.string(),
+      })
+    )
+    .min(1)
+    .max(100),
   force: z.boolean().default(false),
   done: z.boolean().default(false),
 });
@@ -110,12 +125,7 @@ export const memoryTypeSchema = z.enum([
   'procedure',
 ]);
 
-export const todoStatusSchema = z.enum([
-  'pending',
-  'in_progress',
-  'done',
-  'cancelled',
-]);
+export const todoStatusSchema = z.enum(['pending', 'in_progress', 'done', 'cancelled']);
 
 export const createMemorySchema = z.object({
   projectName: projectNameSchema.optional(),
@@ -132,9 +142,10 @@ export const recallMemorySchema = z.object({
   type: z.union([memoryTypeSchema, z.literal('all')]).default('all'),
   limit: limitSchema.optional(),
   tag: z.string().max(50).optional(),
-  graphRecall: z.boolean().optional(),  // Phase 4: spreading activation
-  ragFusion: z.boolean().optional(),   // RAG-Fusion: multi-query + RRF merge
+  graphRecall: z.boolean().optional(), // Phase 4: spreading activation
+  ragFusion: z.boolean().optional(), // RAG-Fusion: multi-query + RRF merge
   recencyBoost: z.number().min(0).max(1).optional(), // Recency boost weight (0-1)
+  multiStrategy: z.boolean().optional(), // TEMPR: semantic + keyword + temporal RRF fusion
 });
 
 export const promoteMemorySchema = z.object({
@@ -171,12 +182,14 @@ export const searchGroupedSchema = z.object({
   limit: z.number().int().min(1).max(100).default(10),
   groupSize: z.number().int().min(1).max(10).default(1),
   mode: searchModeSchema,
-  filters: z.object({
-    language: z.string().optional(),
-    path: z.string().optional(),
-    layer: z.string().optional(),
-    service: z.string().optional(),
-  }).optional(),
+  filters: z
+    .object({
+      language: z.string().optional(),
+      path: z.string().optional(),
+      layer: z.string().optional(),
+      service: z.string().optional(),
+    })
+    .optional(),
   scoreThreshold: z.number().min(0).max(1).optional(),
 });
 
@@ -186,12 +199,14 @@ export const searchHybridSchema = z.object({
   limit: z.number().int().min(1).max(100).default(10),
   semanticWeight: z.number().min(0).max(1).default(0.7),
   mode: searchModeSchema,
-  filters: z.object({
-    language: z.string().optional(),
-    path: z.string().optional(),
-    layer: z.string().optional(),
-    service: z.string().optional(),
-  }).optional(),
+  filters: z
+    .object({
+      language: z.string().optional(),
+      path: z.string().optional(),
+      layer: z.string().optional(),
+      service: z.string().optional(),
+    })
+    .optional(),
 });
 
 export const reviewSchema = z.object({
@@ -293,15 +308,10 @@ export type ValidationTarget = 'body' | 'query' | 'params';
  * Create a validation middleware for a Zod schema.
  * Forwards ZodErrors to the global error handler.
  */
-export function validate<T extends z.ZodType>(
-  schema: T,
-  target: ValidationTarget = 'body'
-) {
+export function validate<T extends z.ZodType>(schema: T, target: ValidationTarget = 'body') {
   return async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const data = target === 'body' ? req.body :
-                   target === 'query' ? req.query :
-                   req.params;
+      const data = target === 'body' ? req.body : target === 'query' ? req.query : req.params;
 
       const validated = await schema.parseAsync(data);
 
@@ -324,14 +334,11 @@ export function validate<T extends z.ZodType>(
 /**
  * Validate project name from headers or body
  */
-export function validateProjectName(
-  req: Request,
-  res: Response,
-  next: NextFunction
-) {
-  const projectName = req.headers['x-project-name'] as string ||
-                      req.body?.projectName ||
-                      req.query?.projectName as string;
+export function validateProjectName(req: Request, res: Response, next: NextFunction) {
+  const projectName =
+    (req.headers['x-project-name'] as string) ||
+    req.body?.projectName ||
+    (req.query?.projectName as string);
 
   if (!projectName) {
     return res.status(400).json({
@@ -387,12 +394,14 @@ export const mergeMemoriesSchema = z.object({
 
 export const maintenanceSchema = z.object({
   projectName: projectNameSchema.optional(),
-  operations: z.object({
-    quarantine_cleanup: z.boolean().default(true),
-    feedback_maintenance: z.boolean().default(true),
-    compaction: z.boolean().default(false),
-    compaction_dry_run: z.boolean().default(true),
-  }).optional(),
+  operations: z
+    .object({
+      quarantine_cleanup: z.boolean().default(true),
+      feedback_maintenance: z.boolean().default(true),
+      compaction: z.boolean().default(false),
+      compaction_dry_run: z.boolean().default(true),
+    })
+    .optional(),
 });
 
 export const forgetOlderThanSchema = z.object({
@@ -454,7 +463,7 @@ export const tribunalDebateSchema = z.object({
   maxRounds: z.number().int().min(1).max(3).default(1),
   useCodeContext: z.boolean().default(false),
   autoRecord: z.boolean().default(false),
-  maxBudget: z.number().min(0.01).max(5).default(0.50),
+  maxBudget: z.number().min(0.01).max(5).default(0.5),
   deepResearch: z.boolean().default(false),
 });
 
@@ -504,12 +513,17 @@ export const stopAutonomousAgentSchema = z.object({
 export const workflowSchema = z.object({
   projectName: projectNameSchema.optional(),
   projectPath: z.string().min(1).max(1000),
-  steps: z.array(z.object({
-    id: z.string().min(1).max(100),
-    type: z.enum(['smart_dispatch', 'agent', 'tribunal', 'claude_agent']),
-    config: z.record(z.string(), z.unknown()),
-    parallel: z.string().max(50).optional(),
-  })).min(1).max(20),
+  steps: z
+    .array(
+      z.object({
+        id: z.string().min(1).max(100),
+        type: z.enum(['smart_dispatch', 'agent', 'tribunal', 'claude_agent']),
+        config: z.record(z.string(), z.unknown()),
+        parallel: z.string().max(50).optional(),
+      })
+    )
+    .min(1)
+    .max(20),
 });
 
 export type WorkflowInput = z.infer<typeof workflowSchema>;
