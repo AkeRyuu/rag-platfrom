@@ -137,6 +137,7 @@ import { Queue, Worker } from 'bullmq';
 import { ActorRef, Actor, type ActorMessage } from '../../actors/base-actor';
 import { MemoryActor } from '../../actors/memory-actor';
 import { sessionActor, type SessionActorState } from '../../actors/session-actor';
+import { IndexActor } from '../../actors/index-actor';
 import { actorSystem } from '../../actors/actor-system';
 
 // ---------------------------------------------------------------------------
@@ -1021,6 +1022,159 @@ describe('SessionActor', () => {
       // Should still reach 'ended' status despite consolidation failure
       expect(newState.status).toBe('ended');
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// IndexActor
+// ---------------------------------------------------------------------------
+
+describe('IndexActor', () => {
+  let actor: IndexActor;
+  const defaultState = () => ({
+    lastIndexedAt: '',
+    lastDuration: 0,
+    lastFileCount: 0,
+    lastChunkCount: 0,
+    totalIndexRuns: 0,
+    lastError: null as string | null,
+    isIndexing: false,
+  });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    actor = new IndexActor();
+  });
+
+  it('has actorType "index"', () => {
+    expect(actor.actorType).toBe('index');
+  });
+
+  it('tracks indexing start → isIndexing=true', async () => {
+    const state = defaultState();
+    const payload = { projectName: 'myproject', totalFiles: 50 };
+
+    const newState = await actor.handle(
+      'index:myproject',
+      makeMessage('index:started', payload, 'index:myproject'),
+      state
+    );
+
+    expect(newState.isIndexing).toBe(true);
+    expect(newState.lastError).toBeNull();
+  });
+
+  it('clears lastError when indexing starts', async () => {
+    const state = { ...defaultState(), lastError: 'previous error' };
+    const payload = { projectName: 'myproject', totalFiles: 10 };
+
+    const newState = await actor.handle(
+      'index:myproject',
+      makeMessage('index:started', payload, 'index:myproject'),
+      state
+    );
+
+    expect(newState.lastError).toBeNull();
+  });
+
+  it('tracks indexing completion with stats', async () => {
+    const state = { ...defaultState(), isIndexing: true };
+    const payload = {
+      projectName: 'myproject',
+      stats: { duration: 1500, indexedFiles: 42, totalChunks: 210 },
+    };
+
+    const newState = await actor.handle(
+      'index:myproject',
+      makeMessage('index:completed', payload, 'index:myproject'),
+      state
+    );
+
+    expect(newState.isIndexing).toBe(false);
+    expect(newState.lastDuration).toBe(1500);
+    expect(newState.lastFileCount).toBe(42);
+    expect(newState.lastChunkCount).toBe(210);
+    expect(newState.lastError).toBeNull();
+    expect(typeof newState.lastIndexedAt).toBe('string');
+    expect(newState.lastIndexedAt).not.toBe('');
+  });
+
+  it('falls back to totalFiles when indexedFiles is absent', async () => {
+    const state = { ...defaultState(), isIndexing: true };
+    const payload = {
+      projectName: 'myproject',
+      stats: { duration: 500, totalFiles: 30, totalChunks: 90 },
+    };
+
+    const newState = await actor.handle(
+      'index:myproject',
+      makeMessage('index:completed', payload, 'index:myproject'),
+      state
+    );
+
+    expect(newState.lastFileCount).toBe(30);
+  });
+
+  it('increments totalIndexRuns on completion', async () => {
+    let state = defaultState();
+    const payload = {
+      projectName: 'myproject',
+      stats: { duration: 100, indexedFiles: 5, totalChunks: 10 },
+    };
+
+    state = await actor.handle(
+      'index:myproject',
+      makeMessage('index:completed', payload, 'index:myproject'),
+      state
+    );
+    state = await actor.handle(
+      'index:myproject',
+      makeMessage('index:completed', payload, 'index:myproject'),
+      state
+    );
+
+    expect(state.totalIndexRuns).toBe(2);
+  });
+
+  it('records error on index:failed', async () => {
+    const state = { ...defaultState(), isIndexing: true };
+    const payload = { projectName: 'myproject', error: 'Disk full' };
+
+    const newState = await actor.handle(
+      'index:myproject',
+      makeMessage('index:failed', payload, 'index:myproject'),
+      state
+    );
+
+    expect(newState.isIndexing).toBe(false);
+    expect(newState.lastError).toBe('Disk full');
+  });
+
+  it('records "Unknown error" when error field is absent on index:failed', async () => {
+    const state = { ...defaultState(), isIndexing: true };
+    const payload = { projectName: 'myproject' };
+
+    const newState = await actor.handle(
+      'index:myproject',
+      makeMessage('index:failed', payload as any, 'index:myproject'),
+      state
+    );
+
+    expect(newState.lastError).toBe('Unknown error');
+  });
+
+  it('handles index:progress without modifying meaningful state', async () => {
+    const state = { ...defaultState(), isIndexing: true, totalIndexRuns: 1 };
+    const payload = { projectName: 'myproject', processedFiles: 10, totalFiles: 50 };
+
+    const newState = await actor.handle(
+      'index:myproject',
+      makeMessage('index:progress', payload, 'index:myproject'),
+      state
+    );
+
+    expect(newState.isIndexing).toBe(true);
+    expect(newState.totalIndexRuns).toBe(1);
   });
 });
 

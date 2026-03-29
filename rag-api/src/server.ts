@@ -217,14 +217,15 @@ export async function startServer(): Promise<void> {
     const { actorSystem } = await import('./actors/actor-system');
     const { memoryActor } = await import('./actors/memory-actor');
     const { sessionActor } = await import('./actors/session-actor');
-
     const { maintenanceActor } = await import('./actors/maintenance-actor');
+    const { indexActor } = await import('./actors/index-actor');
 
     actorSystem.register(memoryActor, 3); // 3 concurrent project actors
     actorSystem.register(sessionActor, 5); // 5 concurrent session actors
     actorSystem.register(maintenanceActor, 1); // singleton, concurrency 1
+    actorSystem.register(indexActor, 3); // 3 concurrent project indexing actors
 
-    logger.info('Actor system started', { actors: ['memory', 'session', 'maintenance'] });
+    logger.info('Actor system started', { actors: ['memory', 'session', 'maintenance', 'index'] });
 
     // Start server
     app.listen(config.API_PORT, config.API_HOST, () => {

@@ -9,8 +9,6 @@ import { eventEmittedTotal } from '../utils/metrics';
 
 // Infrastructure events that stay on plain BullMQ queues
 const EVENT_QUEUE_MAP: Partial<Record<DomainEventType, QueueName>> = {
-  'index:started': 'indexing',
-  'index:completed': 'indexing',
   'maintenance:cycle.started': 'maintenance',
   'maintenance:dedup.completed': 'maintenance',
 };
@@ -54,6 +52,22 @@ const ACTOR_ROUTES: Partial<
   'sensory:appended': {
     actorType: 'session',
     getActorId: (p) => `session:${p.projectName}:${p.sessionId}`,
+  },
+  'index:started': {
+    actorType: 'index',
+    getActorId: (p: any) => `index:${p.projectName}`,
+  },
+  'index:progress': {
+    actorType: 'index',
+    getActorId: (p: any) => `index:${p.projectName}`,
+  },
+  'index:completed': {
+    actorType: 'index',
+    getActorId: (p: any) => `index:${p.projectName}`,
+  },
+  'index:failed': {
+    actorType: 'index',
+    getActorId: (p: any) => `index:${p.projectName}`,
   },
 };
 
